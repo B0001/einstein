@@ -28,11 +28,13 @@ from typing import Any, Protocol
 import requests
 
 from einstein.schema import Record
+from einstein.store import DEFAULT_NEGATIVE_TTL_DAYS, Store
 
 logger = logging.getLogger(__name__)
 
 OPENALEX_WORKS_URL = "https://api.openalex.org/works"
 DEFAULT_TIMEOUT = 30
+SOURCE = "openalex"
 
 
 class OpenAlexFetchError(Exception):
@@ -94,6 +96,8 @@ def fetch_work_by_doi(
     *,
     mailto: str | None = None,
     http: _HttpClient | None = None,
+    store: Store | None = None,
+    ttl_days: int = DEFAULT_NEGATIVE_TTL_DAYS,
 ) -> Record:
     """Look up a single OpenAlex work by DOI, mapped to a Record.
 
@@ -103,9 +107,29 @@ def fetch_work_by_doi(
     OpenAlex, or (with `not_found=False`) for any other non-200 response.
     `http` defaults to the `requests` module; pass a fake with a `.get`
     method to test without the network.
+
+    If `store` is given, the cache is keyed on the normalized bare DOI (the
+    `mailto` param is a polite-pool hint, not part of the query's identity,
+    so it is excluded from the cache key). A cached found-work replays from
+    `Store.get_record`. "Not in OpenAlex" is itself a search outcome -- a
+    404 is cached as a `status="ok"`, zero-`ids` row, same as a zero-result
+    search on the other fetchers -- so a not-yet-expired cached absence
+    re-raises `OpenAlexFetchError(not_found=True)` without a network call;
+    see `einstein/store.py` for why negatives expire and positives do not.
     """
-    client: _HttpClient = http if http is not None else requests
     bare_doi = doi.removeprefix("https://doi.org/").removeprefix("http://doi.org/")
+    if store is not None:
+        cached = store.lookup_query(source=SOURCE, query=bare_doi, params={}, ttl_days=ttl_days)
+        if cached.status == "positive":
+            record = store.get_record("paper", cached.ids[0])
+            if record is not None:
+                return record
+        if cached.status == "negative":
+            raise OpenAlexFetchError(
+                404, f"OpenAlex lookup failed (cached not-found): doi={doi!r}", not_found=True
+            )
+
+    client: _HttpClient = http if http is not None else requests
     url = f"{OPENALEX_WORKS_URL}/doi:{bare_doi}"
 
     response = client.get(url, params=_params(mailto), timeout=DEFAULT_TIMEOUT)
@@ -117,9 +141,23 @@ def fetch_work_by_doi(
             logger.info(message)
         else:
             logger.error(message)
+        if store is not None:
+            if not_found:
+                status = "ok"
+            elif response.status_code == 429:
+                status = "rate_limited"
+            else:
+                status = "error"
+            store.upsert_query(source=SOURCE, query=bare_doi, params={}, status=status, record_type="paper")
         raise OpenAlexFetchError(response.status_code, message, not_found=not_found)
 
-    return _to_record(response.json())
+    record = _to_record(response.json())
+    if store is not None:
+        store.upsert_record(record)
+        store.upsert_query(
+            source=SOURCE, query=bare_doi, params={}, status="ok", record_type="paper", ids=[record.id]
+        )
+    return record
 
 
 @dataclass(frozen=True, slots=True)
@@ -135,14 +173,18 @@ def fetch_citation_edges(
     *,
     mailto: str | None = None,
     http: _HttpClient | None = None,
+    store: Store | None = None,
+    ttl_days: int = DEFAULT_NEGATIVE_TTL_DAYS,
 ) -> list[Edge]:
     """Fetch the seed work at `doi` and return its outbound citation edges.
 
     One edge per entry in the work's `referenced_works` -- i.e. "this paper
     cites that paper". An empty list means the work was found but cites
     nothing in OpenAlex's index; a lookup failure raises `OpenAlexFetchError`
-    instead of returning `[]`, so the two are never conflated.
+    instead of returning `[]`, so the two are never conflated. `store` (if
+    given) is passed straight through to `fetch_work_by_doi` -- edges
+    themselves are not persisted, only the underlying work `Record`.
     """
-    record = fetch_work_by_doi(doi, mailto=mailto, http=http)
+    record = fetch_work_by_doi(doi, mailto=mailto, http=http, store=store, ttl_days=ttl_days)
     referenced = record.raw.get("referenced_works") or []
     return [Edge(from_id=record.id, to_id=_short_id(ref)) for ref in referenced]

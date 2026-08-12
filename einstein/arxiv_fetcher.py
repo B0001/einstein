@@ -29,10 +29,12 @@ from typing import Any, Protocol
 import arxiv
 
 from einstein.schema import Record
+from einstein.store import DEFAULT_NEGATIVE_TTL_DAYS, Store
 
 logger = logging.getLogger(__name__)
 
 DEFAULT_MAX_RESULTS = 30
+SOURCE = "arxiv"
 
 
 class ArxivFetchError(Exception):
@@ -87,6 +89,8 @@ def fetch_papers(
     *,
     max_results: int = DEFAULT_MAX_RESULTS,
     client: _ArxivClient | None = None,
+    store: Store | None = None,
+    ttl_days: int = DEFAULT_NEGATIVE_TTL_DAYS,
 ) -> list[Record]:
     """Search arXiv for papers matching `query`, newest submissions first.
 
@@ -95,7 +99,29 @@ def fetch_papers(
     treat that the same as a genuine zero-results search, which returns
     `[]` normally. `client` defaults to `arxiv.Client()`; pass a fake with
     a `.results` method to test without the network.
+
+    If `store` is given, a cached outcome for this exact `(query,
+    max_results)` short-circuits the network call: a prior positive result
+    is replayed from `Store.get_record`, a prior not-yet-expired negative
+    replays as `[]`. Otherwise the search runs live and its outcome --
+    including a genuine zero-result search or a rate-limited/failed
+    attempt -- is written to `store` via `Store.upsert_query` so the next
+    call (in this run or a future one) can see it. See `einstein/store.py`
+    for what each cached status means and why negatives expire and
+    positives do not.
     """
+    params = {"max_results": max_results}
+    if store is not None:
+        cached = store.lookup_query(source=SOURCE, query=query, params=params, ttl_days=ttl_days)
+        if cached.status == "positive":
+            return [
+                record
+                for record in (store.get_record("paper", id_) for id_ in cached.ids)
+                if record is not None
+            ]
+        if cached.status == "negative":
+            return []
+
     active_client: _ArxivClient = client if client is not None else arxiv.Client()
     search = arxiv.Search(
         query=query,
@@ -108,9 +134,25 @@ def fetch_papers(
     except arxiv.ArxivError as exc:
         message = f"arXiv search failed for query={query!r}: {exc}"
         logger.error(message)
+        if store is not None:
+            status = "rate_limited" if getattr(exc, "status", None) == 429 else "error"
+            store.upsert_query(source=SOURCE, query=query, params=params, status=status, record_type="paper")
         raise ArxivFetchError(message, query=query, cause=exc) from exc
 
     if not results:
         logger.info("arXiv search returned zero results for query=%r", query)
 
-    return [_to_record(result) for result in results]
+    records = [_to_record(result) for result in results]
+    if store is not None:
+        for record in records:
+            store.upsert_record(record)
+        store.upsert_query(
+            source=SOURCE,
+            query=query,
+            params=params,
+            status="ok",
+            record_type="paper",
+            ids=[record.id for record in records],
+        )
+
+    return records

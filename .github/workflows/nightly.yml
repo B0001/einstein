@@ -1,0 +1,82 @@
+name: nightly gap-detection run
+
+# einstein-21: "cron/Actions for nightly runs" -- a scheduled GitHub Actions
+# job, not a DAG engine (see the bead: "a DAG engine for a linear pipeline is
+# 3am-page material"). This runs the CLI once for one domain and uploads
+# whatever it reports -- including a failed/skipped-source report -- as a
+# build artifact. It does not retry, does not fan out to multiple domains,
+# and does not push results anywhere; wiring a destination (issue, PR,
+# dashboard) is separate scope, not assumed here.
+#
+# `domain` and `repo-threshold`/`patent-threshold` are workflow_dispatch
+# inputs so a run can be triggered by hand with different values; the
+# schedule always uses the defaults below.
+
+on:
+  schedule:
+    # 03:17 UTC daily -- off the hour, so this isn't queued at the exact
+    # instant every other nightly-run cron in the world also fires.
+    - cron: "17 3 * * *"
+  workflow_dispatch:
+    inputs:
+      domain:
+        description: 'Search query, e.g. "stochastic gradient descent"'
+        required: false
+        default: "quantum error correction"
+      repo-threshold:
+        required: false
+        default: "0.2"
+      patent-threshold:
+        required: false
+        default: "0.2"
+
+env:
+  RUN_DOMAIN: ${{ github.event.inputs.domain || 'quantum error correction' }}
+  RUN_REPO_THRESHOLD: ${{ github.event.inputs.repo-threshold || '0.2' }}
+  RUN_PATENT_THRESHOLD: ${{ github.event.inputs.patent-threshold || '0.2' }}
+
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - run: uv sync
+
+      - name: Run einstein CLI
+        id: run
+        env:
+          # GITHUB_TOKEN is the job's own default token -- raises the
+          # GitHub search rate limit from 60/hr to 5000/hr (github_fetcher.py).
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional: only present if the repo owner configured it. USPTO has
+          # no anonymous path (uspto_fetcher.py) -- without a key the patent
+          # source is skipped outright rather than left to fail the run.
+          USPTO_API_KEY: ${{ secrets.USPTO_API_KEY }}
+        run: |
+          set -eu
+          skip_patents=""
+          if [ -z "${USPTO_API_KEY:-}" ]; then
+            skip_patents="--skip-patents"
+          fi
+          uv run einstein "$RUN_DOMAIN" \
+            --repo-threshold "$RUN_REPO_THRESHOLD" \
+            --patent-threshold "$RUN_PATENT_THRESHOLD" \
+            $skip_patents \
+            --json --output report.json
+          cat report.json
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gap-report-${{ github.run_id }}
+          path: report.json
+          if-no-files-found: warn
+          retention-days: 30

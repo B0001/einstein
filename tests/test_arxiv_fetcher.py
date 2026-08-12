@@ -1,12 +1,18 @@
 import datetime
+import json
+import tempfile
 import unittest
+from pathlib import Path
 
 import arxiv
 
 from einstein.arxiv_fetcher import ArxivFetchError, fetch_papers
+from einstein.store import Store
 
 PUBLISHED = datetime.datetime(2026, 8, 1, 12, 0, tzinfo=datetime.timezone.utc)
 UPDATED = datetime.datetime(2026, 8, 2, 9, 30, tzinfo=datetime.timezone.utc)
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 
 def make_result(
@@ -49,6 +55,20 @@ class FakeArxivClient:
         if self._error is not None:
             raise self._error
         return iter(self._results)
+
+
+def _make_fixture_result():
+    """Build an `arxiv.Result` from the recorded field set in
+    `tests/fixtures/arxiv_paper.json`, for tests that want a result backed
+    by a fixture file rather than `make_result`'s inline defaults."""
+    data = json.loads((FIXTURES_DIR / "arxiv_paper.json").read_text())
+    return make_result(
+        short_id=data["short_id"],
+        title=data["title"],
+        summary=data["summary"],
+        authors=tuple(data["authors"]),
+        categories=tuple(data["categories"]),
+    )
 
 
 class FetchPapersSuccessTest(unittest.TestCase):
@@ -118,6 +138,61 @@ class FetchPapersErrorTest(unittest.TestCase):
         bad_client = FakeArxivClient(error=arxiv.HTTPError(url="http://x", retry=3, status=503))
         with self.assertRaises(ArxivFetchError):
             fetch_papers("x", client=bad_client)
+
+
+class FetchPapersCachingTest(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.store = Store(Path(self._tmpdir.name) / "einstein.db", clock=lambda: "2026-08-08T00:00:00+00:00")
+        self.addCleanup(self.store.close)
+
+    def test_second_identical_fetch_reads_from_store_not_network(self):
+        client = FakeArxivClient([_make_fixture_result()])
+        first = fetch_papers("quantum error correction", client=client, store=self.store)
+        second = fetch_papers("quantum error correction", client=client, store=self.store)
+
+        self.assertEqual(len(client.searches), 1, "second fetch must not re-hit the fake client")
+        self.assertEqual([r.id for r in first], [r.id for r in second])
+        self.assertEqual(second[0].title, "Quantum Error Correction via Foo")
+
+    def test_zero_result_search_is_cached_as_a_negative_not_dropped(self):
+        client = FakeArxivClient([])
+        fetch_papers("asdkfjasldkfjalskdjf_no_match", client=client, store=self.store)
+
+        lookup = self.store.lookup_query(
+            source="arxiv", query="asdkfjasldkfjalskdjf_no_match", params={"max_results": 30}
+        )
+        self.assertEqual(lookup.status, "negative")
+
+    def test_second_zero_result_fetch_does_not_hit_the_network(self):
+        client = FakeArxivClient([])
+        fetch_papers("no match", client=client, store=self.store)
+        fetch_papers("no match", client=client, store=self.store)
+        self.assertEqual(len(client.searches), 1)
+
+    def test_rate_limited_failure_is_cached_as_rate_limited_not_negative(self):
+        client = FakeArxivClient(error=arxiv.HTTPError(url="http://x", retry=3, status=429))
+        with self.assertRaises(ArxivFetchError):
+            fetch_papers("x", client=client, store=self.store)
+
+        lookup = self.store.lookup_query(source="arxiv", query="x", params={"max_results": 30})
+        self.assertEqual(lookup.status, "rate_limited")
+        self.assertNotEqual(lookup.status, "negative")
+
+    def test_non_rate_limit_failure_is_cached_as_error(self):
+        client = FakeArxivClient(error=arxiv.HTTPError(url="http://x", retry=3, status=500))
+        with self.assertRaises(ArxivFetchError):
+            fetch_papers("x", client=client, store=self.store)
+
+        lookup = self.store.lookup_query(source="arxiv", query="x", params={"max_results": 30})
+        self.assertEqual(lookup.status, "error")
+
+    def test_without_store_behaves_exactly_as_before(self):
+        client = FakeArxivClient([_make_fixture_result()])
+        records = fetch_papers("quantum error correction", client=client)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].id, "2508.00001v1")
 
 
 if __name__ == "__main__":

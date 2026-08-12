@@ -1,0 +1,22 @@
+{
+  "_note": "Structurally faithful trimmed shape of a real OpenAlex work response (https://api.openalex.org/works/doi:10.7717/peerj.4375), used by tests/test_openalex_fetcher.py's caching tests.",
+  "id": "https://openalex.org/W2741809807",
+  "doi": "https://doi.org/10.7717/peerj.4375",
+  "title": "The state of OA: a large-scale analysis of the prevalence and impact of Open Access articles",
+  "display_name": "The state of OA: a large-scale analysis of the prevalence and impact of Open Access articles",
+  "publication_date": "2018-02-13",
+  "abstract_inverted_index": {
+    "Despite": [0],
+    "growing": [1],
+    "interest": [2],
+    "in": [3],
+    "Open": [4],
+    "Access": [5]
+  },
+  "referenced_works": [
+    "https://openalex.org/W2100121061",
+    "https://openalex.org/W2144252560",
+    "https://openalex.org/W1995315455"
+  ],
+  "cited_by_count": 400
+}

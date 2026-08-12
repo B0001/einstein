@@ -1,7 +1,13 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from einstein.github_fetcher import GitHubFetchError, fetch_repos
+from einstein.store import Store
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 REPO_ITEM = {
     "full_name": "qiskit/qiskit",
@@ -159,6 +165,65 @@ class FetchReposErrorTest(unittest.TestCase):
         bad_http = FakeHttp(FakeResponse(503, {}, reason="Service Unavailable"))
         with self.assertRaises(GitHubFetchError):
             fetch_repos("x", http=bad_http)
+
+
+class FetchReposCachingTest(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.store = Store(Path(self._tmpdir.name) / "einstein.db", clock=lambda: "2026-08-08T00:00:00+00:00")
+        self.addCleanup(self.store.close)
+
+    def _fixture_payload(self):
+        raw = json.loads((FIXTURES_DIR / "github_repo_search.json").read_text())
+        return {"items": raw["items"]}
+
+    def test_second_identical_fetch_reads_from_store_not_network(self):
+        http = FakeHttp(FakeResponse(200, self._fixture_payload()))
+        first = fetch_repos("qiskit", http=http, store=self.store)
+        second = fetch_repos("qiskit", http=http, store=self.store)
+
+        self.assertEqual(len(http.calls), 1, "second fetch must not re-hit the fake http client")
+        self.assertEqual([r.id for r in first], [r.id for r in second])
+        self.assertEqual(second[0].id, "qiskit/qiskit")
+
+    def test_zero_result_search_is_cached_as_a_negative_not_dropped(self):
+        http = FakeHttp(FakeResponse(200, {"items": []}))
+        fetch_repos("asdkfjasldkfjalskdjf_no_match", http=http, store=self.store)
+
+        lookup = self.store.lookup_query(
+            source="github", query="asdkfjasldkfjalskdjf_no_match", params={"max_results": 30}
+        )
+        self.assertEqual(lookup.status, "negative")
+
+    def test_second_zero_result_fetch_does_not_hit_the_network(self):
+        http = FakeHttp(FakeResponse(200, {"items": []}))
+        fetch_repos("no match", http=http, store=self.store)
+        fetch_repos("no match", http=http, store=self.store)
+        self.assertEqual(len(http.calls), 1)
+
+    def test_429_is_cached_as_rate_limited_not_negative(self):
+        http = FakeHttp(FakeResponse(429, {}, reason="Too Many Requests"))
+        with self.assertRaises(GitHubFetchError):
+            fetch_repos("x", http=http, store=self.store)
+
+        lookup = self.store.lookup_query(source="github", query="x", params={"max_results": 30})
+        self.assertEqual(lookup.status, "rate_limited")
+        self.assertNotEqual(lookup.status, "negative")
+
+    def test_500_is_cached_as_error(self):
+        http = FakeHttp(FakeResponse(500, {}, reason="Internal Server Error"))
+        with self.assertRaises(GitHubFetchError):
+            fetch_repos("x", http=http, store=self.store)
+
+        lookup = self.store.lookup_query(source="github", query="x", params={"max_results": 30})
+        self.assertEqual(lookup.status, "error")
+
+    def test_without_store_behaves_exactly_as_before(self):
+        http = FakeHttp(FakeResponse(200, self._fixture_payload()))
+        records = fetch_repos("qiskit", http=http)
+        self.assertEqual(len(records), 1)
+        self.assertEqual(records[0].id, "qiskit/qiskit")
 
 
 if __name__ == "__main__":

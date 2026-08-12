@@ -1,4 +1,7 @@
+import json
+import tempfile
 import unittest
+from pathlib import Path
 from unittest.mock import patch
 
 from einstein.openalex_fetcher import (
@@ -7,6 +10,9 @@ from einstein.openalex_fetcher import (
     fetch_citation_edges,
     fetch_work_by_doi,
 )
+from einstein.store import Store
+
+FIXTURES_DIR = Path(__file__).parent / "fixtures"
 
 # Trimmed but structurally faithful shape of a real OpenAlex work response
 # (https://api.openalex.org/works/doi:10.7717/peerj.4375).
@@ -159,6 +165,77 @@ class FetchCitationEdgesTest(unittest.TestCase):
         http = FakeHttp(FakeResponse(404, {}))
         with self.assertRaises(OpenAlexFetchError):
             fetch_citation_edges("10.0000/missing", http=http)
+
+
+class FetchWorkByDoiCachingTest(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.store = Store(Path(self._tmpdir.name) / "einstein.db", clock=lambda: "2026-08-08T00:00:00+00:00")
+        self.addCleanup(self.store.close)
+
+    def _fixture_work(self):
+        data = json.loads((FIXTURES_DIR / "openalex_work.json").read_text())
+        data.pop("_note", None)
+        return data
+
+    def test_second_identical_fetch_reads_from_store_not_network(self):
+        http = FakeHttp(FakeResponse(200, self._fixture_work()))
+        first = fetch_work_by_doi("10.7717/peerj.4375", http=http, store=self.store)
+        second = fetch_work_by_doi("10.7717/peerj.4375", http=http, store=self.store)
+
+        self.assertEqual(len(http.calls), 1, "second fetch must not re-hit the fake http client")
+        self.assertEqual(first.id, second.id)
+        self.assertEqual(second.id, "W2741809807")
+
+    def test_doi_url_and_bare_doi_forms_share_one_cache_entry(self):
+        http = FakeHttp(FakeResponse(200, self._fixture_work()))
+        fetch_work_by_doi("10.7717/peerj.4375", http=http, store=self.store)
+        fetch_work_by_doi("https://doi.org/10.7717/peerj.4375", http=http, store=self.store)
+        self.assertEqual(len(http.calls), 1)
+
+    def test_404_is_cached_as_a_negative_and_replayed_without_network(self):
+        http = FakeHttp(FakeResponse(404, {}))
+        with self.assertRaises(OpenAlexFetchError) as first:
+            fetch_work_by_doi("10.0000/missing", http=http, store=self.store)
+        self.assertTrue(first.exception.not_found)
+
+        with self.assertRaises(OpenAlexFetchError) as second:
+            fetch_work_by_doi("10.0000/missing", http=http, store=self.store)
+        self.assertTrue(second.exception.not_found)
+        self.assertEqual(len(http.calls), 1, "cached not-found must not re-hit the network")
+
+    def test_500_is_cached_as_error_not_negative(self):
+        http = FakeHttp(FakeResponse(500, {}))
+        with self.assertRaises(OpenAlexFetchError):
+            fetch_work_by_doi("10.0000/x", http=http, store=self.store)
+
+        lookup = self.store.lookup_query(source="openalex", query="10.0000/x", params={})
+        self.assertEqual(lookup.status, "error")
+
+    def test_without_store_behaves_exactly_as_before(self):
+        http = FakeHttp(FakeResponse(200, self._fixture_work()))
+        record = fetch_work_by_doi("10.7717/peerj.4375", http=http)
+        self.assertEqual(record.id, "W2741809807")
+
+
+class FetchCitationEdgesCachingTest(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.store = Store(Path(self._tmpdir.name) / "einstein.db", clock=lambda: "2026-08-08T00:00:00+00:00")
+        self.addCleanup(self.store.close)
+
+    def test_store_is_passed_through_and_second_call_avoids_network(self):
+        data = json.loads((FIXTURES_DIR / "openalex_work.json").read_text())
+        data.pop("_note", None)
+        http = FakeHttp(FakeResponse(200, data))
+
+        first = fetch_citation_edges("10.7717/peerj.4375", http=http, store=self.store)
+        second = fetch_citation_edges("10.7717/peerj.4375", http=http, store=self.store)
+
+        self.assertEqual(len(http.calls), 1)
+        self.assertEqual(first, second)
 
 
 if __name__ == "__main__":

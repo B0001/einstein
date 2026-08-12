@@ -1,0 +1,12 @@
+{
+  "_note": "Structurally faithful trimmed shape of a USPTO Open Data Portal patent-search 200 response, used by tests/test_uspto_fetcher.py's caching tests.",
+  "count": 1,
+  "patentData": [
+    {
+      "patentNumber": "11234567",
+      "patentTitle": "System and Method for Quantum Error Correction",
+      "abstractText": "A system for correcting errors in a quantum processor.",
+      "grantDate": "2023-05-16"
+    }
+  ]
+}

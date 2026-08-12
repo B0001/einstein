@@ -19,11 +19,13 @@ from typing import Any, Protocol
 import requests
 
 from einstein.schema import Record
+from einstein.store import DEFAULT_NEGATIVE_TTL_DAYS, Store
 
 logger = logging.getLogger(__name__)
 
 GITHUB_SEARCH_URL = "https://api.github.com/search/repositories"
 DEFAULT_TIMEOUT = 30
+SOURCE = "github"
 
 
 class GitHubFetchError(Exception):
@@ -86,6 +88,8 @@ def fetch_repos(
     *,
     max_results: int = 30,
     http: _HttpClient | None = None,
+    store: Store | None = None,
+    ttl_days: int = DEFAULT_NEGATIVE_TTL_DAYS,
 ) -> list[Record]:
     """Search GitHub repositories matching `query`, mapped to Records.
 
@@ -94,7 +98,24 @@ def fetch_repos(
     not treat that the same as a genuine zero-results search, which returns
     `[]` normally. `http` defaults to the `requests` module; pass a fake
     with a `.get` method to test without the network.
+
+    If `store` is given, a cached outcome for this exact `(query,
+    max_results)` short-circuits the network call -- see
+    `arxiv_fetcher.fetch_papers` for the shared cache-then-fetch contract
+    and `einstein/store.py` for what each cached status means.
     """
+    cache_params = {"max_results": max_results}
+    if store is not None:
+        cached = store.lookup_query(source=SOURCE, query=query, params=cache_params, ttl_days=ttl_days)
+        if cached.status == "positive":
+            return [
+                record
+                for record in (store.get_record("repo", id_) for id_ in cached.ids)
+                if record is not None
+            ]
+        if cached.status == "negative":
+            return []
+
     client: _HttpClient = http if http is not None else requests
     per_page = min(max_results, 100)
     params = {"q": query, "sort": "stars", "order": "desc", "per_page": per_page}
@@ -114,6 +135,9 @@ def fetch_repos(
             logger.warning("%s (rate-limited, resets at epoch %s)", message, reset)
         else:
             logger.error(message)
+        if store is not None:
+            status = "rate_limited" if rate_limited else "error"
+            store.upsert_query(source=SOURCE, query=query, params=cache_params, status=status, record_type="repo")
         raise GitHubFetchError(response.status_code, message, rate_limited=rate_limited)
 
     payload = response.json()
@@ -121,4 +145,17 @@ def fetch_repos(
     if not items:
         logger.info("GitHub search returned zero results for query=%r", query)
 
-    return [_to_record(item) for item in items[:max_results]]
+    records = [_to_record(item) for item in items[:max_results]]
+    if store is not None:
+        for record in records:
+            store.upsert_record(record)
+        store.upsert_query(
+            source=SOURCE,
+            query=query,
+            params=cache_params,
+            status="ok",
+            record_type="repo",
+            ids=[record.id for record in records],
+        )
+
+    return records

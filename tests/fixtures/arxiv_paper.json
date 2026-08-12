@@ -1,0 +1,10 @@
+{
+  "_note": "Structurally faithful shape of one arXiv Atom feed entry, pre-parsed into the fields tests/test_arxiv_fetcher.py needs to construct an arxiv.Result fake (the arxiv package parses the Atom XML itself; faking at the Result layer, backed by this recorded field set, is the seam this fetcher already tests at).",
+  "short_id": "2508.00001v1",
+  "title": "Quantum Error Correction via Foo",
+  "summary": "We propose a method for quantum error correction.",
+  "authors": ["Jane Doe", "John Roe"],
+  "categories": ["quant-ph", "cs.LG"],
+  "published": "2026-08-01T12:00:00+00:00",
+  "updated": "2026-08-02T09:30:00+00:00"
+}

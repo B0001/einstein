@@ -19,6 +19,40 @@ uv run python -m unittest discover tests
 `uv run` writes its virtualenv to `/tmp/venv` in this container
 (`UV_PROJECT_ENVIRONMENT`) — the mounted host `.venv` is not used here.
 
+## CLI (`einstein-21`)
+
+```bash
+uv run einstein "stochastic gradient descent"
+uv run einstein "stochastic gradient descent" --json --output report.json
+uv run einstein "stochastic gradient descent" --skip-patents  # no USPTO_API_KEY configured
+```
+
+`--repo-threshold` / `--patent-threshold` map directly onto `einstein/gaps.py`'s
+thresholds. `--skip-papers` / `--skip-repos` / `--skip-patents` leave a corpus
+empty *on purpose*; the report says `skipped (--skip-x)`, never a bare zero,
+because "the user chose not to search" and "the search failed" are different
+facts and this CLI keeps them visibly separate (see `einstein/cli.py`'s module
+docstring). A live fetch failure (rate limit, missing `USPTO_API_KEY`,
+unreachable API) exits nonzero with **no report at all** — a report built on
+a partially-failed ingest is worse than no report.
+
+### Scheduled runs
+
+Two ways to run this on a schedule, per the bead's own note — cron/Actions
+before a DAG engine, since this is a linear pipeline:
+
+- `.github/workflows/nightly.yml` — a scheduled GitHub Actions job (03:17 UTC
+  daily, also runnable by hand via `workflow_dispatch`) that runs the CLI for
+  one domain and uploads the JSON report as a build artifact. Uses the job's
+  own `GITHUB_TOKEN` for the GitHub fetcher's higher rate limit; passes
+  `--skip-patents` automatically if the `USPTO_API_KEY` repo secret is not
+  set.
+- `scripts/nightly_run.sh` — the same wrapper for a self-hosted `cron`,
+  writing timestamped JSON reports under `./reports/`.
+
+Neither pushes results anywhere beyond the artifact/file — wiring a
+destination (issue, dashboard, notification) is separate, unbuilt scope.
+
 Tests never touch the network: every fetcher test runs against a recorded or
 faked response. Live API calls (arXiv, GitHub, OpenAlex, USPTO) are separate,
 hand-run scripts under `scripts/`, not part of `unittest discover`.
