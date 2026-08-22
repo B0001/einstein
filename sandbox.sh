@@ -46,6 +46,14 @@ if ! mkdir "$LOCK_DIR" 2>/dev/null; then
 fi
 trap 'rmdir "$LOCK_DIR" 2>/dev/null' EXIT
 
+# Ctrl-C must stop the RUN, not just the worker. `docker run -it` forwards the
+# terminal's SIGINT to the container, claude catches it and exits non-zero, and
+# docker itself returns normally -- so bash sees an ordinary failed command and
+# dispatches the next worker. You cannot interrupt the loop, and every Ctrl-C
+# burns an attempt until MAX_ATTEMPTS parks a bead that was never actually
+# tried. The trap fires once the foreground docker returns, which is enough.
+trap 'echo; echo "==> interrupted; stopping."; exit 130' INT
+
 # Docker initialises a named volume root-owned when its mount path doesn't
 # already exist in the image, so the two uv volumes come up as root:root and
 # uv is unusable for the node (uid 1000) user every worker runs as. Relocating
