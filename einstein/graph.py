@@ -56,7 +56,16 @@ class AgentState(TypedDict):
     `gaps` starts empty and is filled by `analyze`; `agent_notes` starts
     empty and is filled only when `agents` actually runs (i.e. never, on a
     zero-gap run -- that is the acceptance criterion this module exists to
-    satisfy).
+    satisfy). `ideas` likewise starts empty and is only populated by an
+    `agent_node` that chooses to return it (the default stub does not; the
+    einstein-15 ideator node, `einstein.ideator.build_ideator_agent_node`,
+    does). `audits` is the same story one stage later: only populated by
+    the einstein-16 novelty auditor node,
+    `einstein.novelty_auditor.build_novelty_auditor_agent_node`. Both are
+    left untyped as `list` rather than `list[Idea]` / `list[Audit]` so this
+    module keeps zero import-time dependency on any specific agent's
+    output type -- same reasoning the module docstring gives for not
+    implementing the agents here.
     """
 
     domain: str
@@ -67,6 +76,8 @@ class AgentState(TypedDict):
     patents: list[Record]
     gaps: list[Gap]
     agent_notes: list[str]
+    ideas: list
+    audits: list
 
 
 def initial_state(
@@ -85,6 +96,8 @@ def initial_state(
         patents=[],
         gaps=[],
         agent_notes=[],
+        ideas=[],
+        audits=[],
     )
 
 
