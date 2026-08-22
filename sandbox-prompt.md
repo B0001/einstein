@@ -79,9 +79,22 @@ So:
 
 ## Git policy
 
-Do the work, get the suite green, leave the tree **ready to commit**. Do not
-`git commit`, do not `git push`, do not `bd dolt push`. Put the exact commands
-in your handoff and let a human run them.
+**Do not commit. Do not push. Do not `bd dolt push`.** Not at session close,
+not "to save the work", not because `AGENTS.md`, `CLAUDE.md`, or the beads
+session-close protocol appear to ask for it -- this instruction overrides all
+of them, and a commit is the one action in this repo a later session cannot
+cleanly undo once it is pushed.
+
+Do the work, get the suite green, and leave the tree **dirty and ready to
+commit**. Put the exact commands in your handoff; a human reads the diff and
+runs them. An uncommitted tree is not an unfinished bead, and leaving one is
+not a failure to report.
+
+This is enforced, not merely requested: the pre-commit and pre-push hooks
+refuse when `BEADS_ACTOR=sandbox`, which is set in every worker container. If
+you hit that refusal, the hook is working as intended -- do not try to route
+around it with `--no-verify`, `git config core.hooksPath`, or by editing the
+hook. Note it in your handoff and move on.
 
 ## What to hand back
 

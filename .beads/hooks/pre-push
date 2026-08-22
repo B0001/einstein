@@ -1,4 +1,13 @@
 #!/usr/bin/env sh
+
+# --- sandbox guard (NOT managed by beads; keep outside the markers below) ---
+# Pushing is the irreversible one: it publishes worker output to origin and
+# would trigger the nightly Actions workflow. Blocked for containers.
+if [ "${BEADS_ACTOR:-}" = "sandbox" ]; then
+  echo >&2 "pre-push: refusing -- BEADS_ACTOR=sandbox. A human pushes."
+  exit 1
+fi
+# --- end sandbox guard ---
 # --- BEGIN BEADS INTEGRATION v1.1.2 ---
 # This section is managed by beads. Do not remove these markers.
 if command -v bd >/dev/null 2>&1; then
