@@ -34,6 +34,7 @@ cd "$(dirname "$0")" || exit 1
 [ -n "${CLAUDE_CODE_OAUTH_TOKEN:-}" ] || { echo "export CLAUDE_CODE_OAUTH_TOKEN first"; exit 1; }
 [ -n "${GITHUB_TOKEN:-}" ] || echo "warning: GITHUB_TOKEN unset -- GitHub fetcher beads get 60 req/hr"
 [ -n "${USPTO_API_KEY:-}" ] || echo "warning: USPTO_API_KEY unset -- fetch_patents() raises before it calls out"
+[ -n "${OPENALEX_MAILTO:-}" ] || echo "warning: OPENALEX_MAILTO unset -- OpenAlex calls fall back to the anonymous pool"
 mkdir -p "$HANDOFF_DIR"
 
 # Two concurrent loops would re-dispatch each other's in-progress beads, so
@@ -73,6 +74,7 @@ run_worker() {
     -e UV_PROJECT_ENVIRONMENT=/tmp/venv \
     -e GITHUB_TOKEN="${GITHUB_TOKEN:-}" \
     -e USPTO_API_KEY="${USPTO_API_KEY:-}" \
+    -e OPENALEX_MAILTO="${OPENALEX_MAILTO:-}" \
     -e BEADS_ACTOR=sandbox \
     -v claude-uv-cache:/home/node/.cache/uv \
     -v claude-uv-python:/home/node/.local/share/uv/python \
