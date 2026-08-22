@@ -14,7 +14,10 @@
 #     OpenAlex). The container gets the host's network, but NOT the host's
 #     shell env -- the tokens are forwarded explicitly below because an
 #     unauthenticated worker hits a rate limit and files a bug that is really
-#     a 403.
+#     a 403. They are forwarded as bare `-e NAME`, NOT `-e NAME="$NAME"`:
+#     the second form puts the secret in docker's argv, where any user on
+#     the host can read it out of `ps`. The bare form takes the value from
+#     this script's environment and never writes it down.
 #   * Do NOT add a volume for /home/node/.claude. The config claude reads is
 #     /home/node/.claude.json, which sits OUTSIDE that directory; persisting
 #     only the directory leaves a stale .claude/backups/ next to a missing
@@ -66,15 +69,15 @@ docker run --rm -v claude-uv-cache:/a -v claude-uv-python:/b busybox \
 
 run_worker() {
   docker run -it --rm \
-    -e CLAUDE_CODE_OAUTH_TOKEN="${CLAUDE_CODE_OAUTH_TOKEN}" \
+    -e CLAUDE_CODE_OAUTH_TOKEN \
     -e ANTHROPIC_BASE_URL="http://host.docker.internal:4000" \
     --add-host=host.docker.internal:host-gateway \
     -e ANTHROPIC_SMALL_FAST_MODEL="local-ollama-fast" \
     -v "$(pwd)":/workspace \
     -e UV_PROJECT_ENVIRONMENT=/tmp/venv \
-    -e GITHUB_TOKEN="${GITHUB_TOKEN:-}" \
-    -e USPTO_API_KEY="${USPTO_API_KEY:-}" \
-    -e OPENALEX_MAILTO="${OPENALEX_MAILTO:-}" \
+    -e GITHUB_TOKEN \
+    -e USPTO_API_KEY \
+    -e OPENALEX_MAILTO \
     -e BEADS_ACTOR=sandbox \
     -v claude-uv-cache:/home/node/.cache/uv \
     -v claude-uv-python:/home/node/.local/share/uv/python \
@@ -144,10 +147,27 @@ next_ready() { first_unparked "$(ready_ids)"; }
 # sweep. The end-of-run report names anything left, so it is visible either way.
 next_stale() { first_unparked "$(stale_ids)"; }
 
+# Emptiness is the trigger for the triage pass below, and triage FILES BEADS
+# -- it is the only branch of this script that writes. The selectors above
+# swallow any error from bd (deliberately: one unparseable record must not
+# abort a whole drain), so an empty string from them means EITHER "the queue
+# is empty" OR "bd failed", and those are not the same fact. Confirm bd is
+# healthy before trusting emptiness; otherwise a transient bd failure files a
+# duplicate queue on top of the real one. Observed doing exactly that.
+queue_empty() {
+  bd ready --json >/dev/null 2>&1 || {
+    echo "FATAL: 'bd ready --json' failed, so an empty queue cannot be trusted."
+    echo "       Refusing to run triage -- it would file beads over a queue that"
+    echo "       may well exist. Fix bd, then re-run."
+    exit 1
+  }
+  [ -z "$(next_ready)" ] && [ -z "$(next_stale)" ]
+}
+
 # Empty queue on the first pass means the phase has not been triaged yet, not
 # that the work is done. Seed it: one worker that files beads and writes no
 # code.
-if [ -z "$(next_ready)" ] && [ -z "$(next_stale)" ]; then
+if queue_empty; then
   echo "==> queue empty; running triage pass to file beads"
   run_worker "$(cat "$PROMPT_FILE")
 
