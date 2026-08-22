@@ -19,6 +19,22 @@ that share no topical vocabulary with ML/CS research (gardening, recipes,
 knitting, dotfiles, ...). Pairing is `papers[i] <-> unrelated_repos[i]`, a
 fixed rotation with no curation of which paper lands on which repo --
 genuinely-unrelated-by-construction, not cherry-picked to be easy or hard.
+This arm alone cannot distinguish "the score measures opportunity" from "the
+score measures topic distance" -- see ADJACENT ARM below and einstein-0.4.
+
+ADJACENT ARM: the same paper set again, paired against real, well-known
+ML/CS repos that are NOT that paper's implementation and are not any other
+paper's implementation in POSITIVE_PAIRS either -- a different subfield
+(RL, classical ML, MLOps, graph algorithms, distributed training, ...) so
+they share ML/CS vocabulary with the paper without being connected to it.
+Pairing is `papers[i] <-> adjacent_repos[i]`, same fixed-rotation
+construction as the negative arm. These are still ground-truth gaps -- a
+real paper genuinely has no relationship to a randomly-assigned different
+paper's adjacent-subfield tool -- but nothing about shared ML/CS jargon
+helps the detector the way "cooking" vocabulary trivially does. Filed as
+einstein-0.4 because the cooking-only negative arm was saturated
+(flag_rate=1.00 at every threshold) and could not tell "this measures
+opportunity" apart from "this measures topic distance."
 
 Usage: uv run python scripts/harvest_gap_benchmark.py
 """
@@ -89,6 +105,36 @@ UNRELATED_REPOS = [
     "juftin/camply",
 ]
 
+# Real, well-known ML/CS repos for the adjacent-domain arm (einstein-0.4) --
+# a different subfield from each POSITIVE_PAIRS repo (RL, classical ML,
+# MLOps, graph algorithms, distributed training, dialogue systems, ...), none
+# of them the implementation of any paper above or of each other. Verified to
+# exist by a direct GET before being used, same as UNRELATED_REPOS. Canonical
+# owner used where GitHub has since redirected (e.g. deepmind -> deepmind
+# org rename to google-deepmind).
+ADJACENT_REPOS = [
+    "openai/gym",
+    "ray-project/ray",
+    "google-deepmind/acme",
+    "google-deepmind/dm_control",
+    "scikit-learn/scikit-learn",
+    "lightgbm-org/LightGBM",
+    "catboost/catboost",
+    "facebookresearch/faiss",
+    "spotify/annoy",
+    "RasaHQ/rasa",
+    "deepchem/deepchem",
+    "facebookresearch/ParlAI",
+    "streamlit/streamlit",
+    "mlflow/mlflow",
+    "optuna/optuna",
+    "networkx/networkx",
+    "PaddlePaddle/PaddleOCR",
+    "NVIDIA/apex",
+    "horovod/horovod",
+    "apache/tvm",
+]
+
 
 def _sleep_politely() -> None:
     time.sleep(3.0)
@@ -147,6 +193,35 @@ def fetch_negative_arm(papers: list[dict]) -> list[dict]:
     return pairs
 
 
+def fetch_adjacent_arm(papers: list[dict]) -> list[dict]:
+    """einstein-0.4: same construction as fetch_negative_arm, over
+    ADJACENT_REPOS instead of UNRELATED_REPOS -- real ML/CS repos in a
+    different subfield from any paper here, not merely a different domain
+    entirely."""
+    pairs = []
+    repo_records = []
+    for full_name in ADJACENT_REPOS:
+        resp = requests.get(
+            f"https://api.github.com/repos/{full_name}",
+            headers={"Accept": "application/vnd.github+json"},
+            timeout=30,
+        )
+        if resp.status_code != 200:
+            print(f"adjacent: {full_name}  SKIP ({resp.status_code})")
+            continue
+        repo_records.append(_record_to_dict(github_to_record(resp.json())))
+        print(f"adjacent repo: {full_name}  OK")
+
+    assert len(repo_records) >= len(papers), (
+        f"need at least {len(papers)} adjacent-domain repos, only fetched {len(repo_records)} -- "
+        "add more candidates to ADJACENT_REPOS"
+    )
+
+    for i, paper in enumerate(papers):
+        pairs.append({"paper": paper["paper"], "repo": repo_records[i % len(repo_records)]})
+    return pairs
+
+
 def _record_to_dict(record) -> dict:
     return {
         "type": record.type,
@@ -166,22 +241,36 @@ def main() -> None:
     print("\nFetching negative arm (paper <-> unrelated repo)...")
     negative = fetch_negative_arm(positive)
 
+    print("\nFetching adjacent-domain arm (paper <-> different-subfield ML/CS repo)...")
+    adjacent = fetch_adjacent_arm(positive)
+
     fixture = {
         "description": (
-            "einstein-0.1 gap-detection benchmark. positive_pairs: real "
-            "paper<->repo pairs that are known-linked (repo is the paper's "
+            "einstein-0.1/einstein-0.4 gap-detection benchmark. positive_pairs: "
+            "real paper<->repo pairs that are known-linked (repo is the paper's "
             "own reference implementation) -- ground-truth NON-gaps. "
             "negative_pairs: the same papers paired against real repos from "
-            "unrelated domains -- ground-truth gaps. Regenerate with "
+            "domains with no ML/CS vocabulary overlap (cooking, knitting, ...) "
+            "-- ground-truth gaps, saturated/uninformative by construction "
+            "(see einstein-0.4). adjacent_pairs: the same papers paired "
+            "against real ML/CS repos from a different subfield that is "
+            "neither paper's implementation -- ground-truth gaps that share "
+            "ML/CS vocabulary, added by einstein-0.4 so the benchmark can "
+            "tell 'the score measures opportunity' apart from 'the score "
+            "measures topic distance'. Regenerate with "
             "scripts/harvest_gap_benchmark.py."
         ),
         "positive_pairs": positive,
         "negative_pairs": negative,
+        "adjacent_pairs": adjacent,
     }
 
     FIXTURE_PATH.parent.mkdir(parents=True, exist_ok=True)
     FIXTURE_PATH.write_text(json.dumps(fixture, indent=2, sort_keys=True) + "\n")
-    print(f"\nWrote {len(positive)} positive pairs, {len(negative)} negative pairs to {FIXTURE_PATH}")
+    print(
+        f"\nWrote {len(positive)} positive pairs, {len(negative)} negative pairs, "
+        f"{len(adjacent)} adjacent pairs to {FIXTURE_PATH}"
+    )
 
 
 if __name__ == "__main__":
