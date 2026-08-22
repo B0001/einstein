@@ -40,6 +40,35 @@ cd "$(dirname "$0")" || exit 1
 [ -n "${OPENALEX_MAILTO:-}" ] || echo "warning: OPENALEX_MAILTO unset -- OpenAlex calls fall back to the anonymous pool"
 mkdir -p "$HANDOFF_DIR"
 
+# The workers' no-commit rule is enforced by the BEADS_ACTOR guard in
+# .beads/hooks, and git runs NO hook at all -- silently, no error -- when
+# core.hooksPath points at a directory that does not exist. That is how the
+# guard sat disarmed for weeks (einstein-do6): the path was absolute and
+# host-only, so it resolved on the host and vanished inside every container,
+# which is the one place it has to work.
+#
+# core.hooksPath lives in .git/config, which git does not track, so a fresh
+# clone starts with no guard whatsoever. Nothing else would notice. Check it
+# here, before any worker is dispatched, and require a RELATIVE path -- an
+# absolute one is by definition not portable into the container.
+hooks_path="$(git config --get core.hooksPath 2>/dev/null)"
+case "$hooks_path" in
+  "" | /*)
+    echo "FATAL: core.hooksPath is '${hooks_path:-unset}', so the sandbox commit"
+    echo "       guard does not fire inside worker containers. Fix with:"
+    echo "         git config core.hooksPath .beads/hooks"
+    exit 1
+    ;;
+esac
+for hook in pre-commit pre-push; do
+  if [ ! -x "$hooks_path/$hook" ] || ! grep -q BEADS_ACTOR "$hooks_path/$hook"; then
+    echo "FATAL: $hooks_path/$hook is missing, not executable, or has lost its"
+    echo "       BEADS_ACTOR guard. Workers could commit and push. Restore it"
+    echo "       before dispatching."
+    exit 1
+  fi
+done
+
 # Two concurrent loops would re-dispatch each other's in-progress beads, so
 # take an exclusive lock. mkdir is atomic; a stale dir after a hard kill is
 # removed by hand, and the message says so.
