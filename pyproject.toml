@@ -22,3 +22,13 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = ["einstein"]
+
+# The worker loop lives in the verified-sandbox package (`uv tool install
+# --editable`), not in this repo and not in its dependency graph -- it is a tool
+# the repo is driven by, not a library the repo uses, and as a dev dependency it
+# would have to resolve against every consuming repo's requires-python. Only
+# what genuinely differs per repo is here; see that package's README for keys.
+[tool.sandbox.forward-env]
+GITHUB_TOKEN = "GitHub fetcher beads get 60 req/hr"
+USPTO_API_KEY = "fetch_patents() raises before it calls out"
+OPENALEX_MAILTO = "OpenAlex calls fall back to the anonymous pool"
