@@ -16,6 +16,39 @@ An unauthenticated caller can supply a contact email via `OPENALEX_MAILTO`
 (or the `mailto` argument) to join OpenAlex's "polite pool", which gets a
 faster, more consistent rate limit than anonymous requests. This is optional
 -- OpenAlex works without it.
+
+`search_papers` (einstein-0.5) is the free-text paper search
+`einstein.novelty_auditor.audit_idea` needs and had no default for: given a
+method-text query, return the `Record`s OpenAlex thinks are relevant.
+OpenAlex exposes two ways to do that and they are not equivalent:
+
+- `GET /works?search=<q>` runs the query against full-text search (indexed
+  fulltext where available, else title/abstract/other fields) ranked by a
+  relevance score. Live-checked by hand 2026-09-24 against the query
+  "tensor network contraction for transformer attention": 2,515 hits, and
+  the #1 result by relevance_score was "AI-Assisted Pipeline for Dynamic
+  Generation of Trustworthy Health Supplement Content at Scale" -- a
+  supplement-marketing paper with no topical relation to the query at all.
+  High recall, unusable precision for this use case.
+- `GET /works?filter=title_and_abstract.search:<q>` restricts the same
+  ranking to title + abstract text. The identical query against this
+  endpoint returned 7 hits, all transformer/tensor-method papers (e.g.
+  "MMT: Multi-way Multi-modal Transformer for Multimodal Learning"). A
+  second check against "quantum error correction surface code" (a query
+  with much deeper OpenAlex coverage) returned 1,983 hits topped by
+  "Quantum error correction below the surface code threshold" and three
+  more surface-code QEC papers in the top five -- tight and on-topic.
+
+`search_papers` therefore uses `title_and_abstract.search`, not `search`.
+This is a considered trade against Semantic Scholar's `/paper/search`
+(what `gemini_convo.md` names): Semantic Scholar needs a fourth credential
+this repo does not have configured (see einstein-0.5's notes), and the
+`title_and_abstract.search` filter measured above gives adequate recall
+for a method-text query with zero new credentials. If a future query class
+turns up as poorly on this filter as "tensor network contraction..." did on
+plain `search`, that is grounds to revisit -- Semantic Scholar becomes the
+answer after all, per the bead. See `scripts/openalex_search_recall_check.py`
+to re-run this comparison by hand.
 """
 
 from __future__ import annotations
@@ -91,6 +124,26 @@ def _params(mailto: str | None) -> dict[str, str]:
     return {"mailto": email} if email else {}
 
 
+def _filter_value(query: str) -> str:
+    """Escape `query` for use as an OpenAlex `filter=key:<value>` value.
+
+    OpenAlex's filter DSL splits on a bare `,` to separate multiple
+    filters, applied to the raw parameter value regardless of percent-
+    encoding (`%2C` is rejected as an "unescaped comma" too -- confirmed
+    live, see `search_papers`'s docstring). Wrapping the whole value in
+    double quotes, as OpenAlex's own 400 response suggests, avoids that
+    without needing to know their encoding internals. This does change
+    the match from an OR-of-terms to a stemmed phrase match, which is a
+    real precision/recall tradeoff -- but a query with a comma in it (e.g.
+    "gradient descent, adaptive learning rate") is already closer to a
+    phrase than a bag of words, so that tradeoff lands on the reasonable
+    side. Queries without a comma are left exactly as `search_papers`
+    passes them, matching the unquoted behavior this bead's recall check
+    was run against.
+    """
+    return f'"{query}"' if "," in query else query
+
+
 def fetch_work_by_doi(
     doi: str,
     *,
@@ -158,6 +211,95 @@ def fetch_work_by_doi(
             source=SOURCE, query=bare_doi, params={}, status="ok", record_type="paper", ids=[record.id]
         )
     return record
+
+
+def search_papers(
+    query: str,
+    *,
+    max_results: int = 10,
+    mailto: str | None = None,
+    http: _HttpClient | None = None,
+    store: Store | None = None,
+    ttl_days: int = DEFAULT_NEGATIVE_TTL_DAYS,
+) -> list[Record]:
+    """Free-text search OpenAlex works matching `query`, mapped to Records.
+
+    Matches `einstein.novelty_auditor.SearchFn`
+    (`Callable[[str], list[Record]]`) -- pass this directly as
+    `audit_idea(search_papers=search_papers)`. Uses the
+    `title_and_abstract.search` filter, not the plain `search` parameter;
+    see the module docstring for the recall/precision check that decided
+    that.
+
+    Raises `OpenAlexFetchError` for any non-200 response (`not_found` is
+    always `False` here -- a search has no "not found" case distinct from
+    a genuine zero-result search, unlike a single-DOI lookup). A query that
+    matches nothing returns `[]`, not an exception: see `Audit.note`'s
+    "no match found within this search" framing, which depends on `[]`
+    meaning exactly that and nothing else.
+
+    If `store` is given, a cached outcome for this exact `(query,
+    max_results)` short-circuits the network call -- same cache-then-fetch
+    contract as `uspto_fetcher.fetch_patents` and `arxiv_fetcher.fetch_papers`.
+    `mailto` is a polite-pool hint, not part of the query's identity, and is
+    excluded from the cache key (same reasoning as `fetch_work_by_doi`).
+
+    A `query` containing a comma is quote-wrapped before being sent (see
+    `_filter_value`) -- OpenAlex's filter syntax uses an unescaped `,` to
+    separate multiple filters, and live-checked by hand, its edge proxy
+    rejects even a percent-encoded `%2C` in that position with a 400
+    ("A filter value contains an unescaped comma"). Wrapping in double
+    quotes, which OpenAlex's own error message suggests, is the one thing
+    that was confirmed (by hand) to work.
+    """
+    cache_params = {"max_results": max_results}
+    if store is not None:
+        cached = store.lookup_query(source=SOURCE, query=query, params=cache_params, ttl_days=ttl_days)
+        if cached.status == "positive":
+            return [
+                record
+                for record in (store.get_record("paper", id_) for id_ in cached.ids)
+                if record is not None
+            ]
+        if cached.status == "negative":
+            return []
+
+    client: _HttpClient = http if http is not None else requests
+    params = {
+        **_params(mailto),
+        "filter": f"title_and_abstract.search:{_filter_value(query)}",
+        "per-page": max_results,
+    }
+
+    response = client.get(OPENALEX_WORKS_URL, params=params, timeout=DEFAULT_TIMEOUT)
+
+    if response.status_code != 200:
+        message = f"OpenAlex search failed: {response.status_code} for query={query!r}"
+        logger.error(message)
+        if store is not None:
+            status = "rate_limited" if response.status_code == 429 else "error"
+            store.upsert_query(source=SOURCE, query=query, params=cache_params, status=status, record_type="paper")
+        raise OpenAlexFetchError(response.status_code, message, not_found=False)
+
+    payload = response.json()
+    results = payload.get("results") or []
+    if not results:
+        logger.info("OpenAlex search returned zero results for query=%r", query)
+
+    records = [_to_record(item) for item in results[:max_results]]
+    if store is not None:
+        for record in records:
+            store.upsert_record(record)
+        store.upsert_query(
+            source=SOURCE,
+            query=query,
+            params=cache_params,
+            status="ok",
+            record_type="paper",
+            ids=[record.id for record in records],
+        )
+
+    return records
 
 
 @dataclass(frozen=True, slots=True)

@@ -1,0 +1,40 @@
+{
+  "_note": "Structurally faithful trimmed shape of a real OpenAlex /works search response (https://api.openalex.org/works?filter=title_and_abstract.search:quantum+error+correction+surface+code&per-page=2), used by tests/test_openalex_fetcher.py's search tests. Two of five real results kept; irrelevant fields trimmed.",
+  "meta": {
+    "count": 1983,
+    "page": 1,
+    "per_page": 2
+  },
+  "results": [
+    {
+      "id": "https://openalex.org/W4400123456",
+      "doi": "https://doi.org/10.1000/example.qec1",
+      "title": "Quantum error correction below the surface code threshold",
+      "display_name": "Quantum error correction below the surface code threshold",
+      "publication_date": "2024-12-09",
+      "relevance_score": 1737.7512,
+      "abstract_inverted_index": {
+        "Quantum": [0],
+        "error": [1],
+        "correction": [2],
+        "below": [3],
+        "threshold": [4]
+      },
+      "referenced_works": [
+        "https://openalex.org/W3000000001"
+      ],
+      "cited_by_count": 210
+    },
+    {
+      "id": "https://openalex.org/W4400123457",
+      "doi": "https://doi.org/10.1000/example.qec2",
+      "title": "Superconducting quantum circuits at the surface code threshold for fault tolerance",
+      "display_name": "Superconducting quantum circuits at the surface code threshold for fault tolerance",
+      "publication_date": "2023-02-22",
+      "relevance_score": 812.2071,
+      "abstract_inverted_index": null,
+      "referenced_works": [],
+      "cited_by_count": 40
+    }
+  ]
+}

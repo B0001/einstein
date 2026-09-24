@@ -9,6 +9,7 @@ from einstein.openalex_fetcher import (
     OpenAlexFetchError,
     fetch_citation_edges,
     fetch_work_by_doi,
+    search_papers,
 )
 from einstein.store import Store
 
@@ -236,6 +237,139 @@ class FetchCitationEdgesCachingTest(unittest.TestCase):
 
         self.assertEqual(len(http.calls), 1)
         self.assertEqual(first, second)
+
+
+def _search_fixture():
+    data = json.loads((FIXTURES_DIR / "openalex_work_search.json").read_text())
+    data.pop("_note", None)
+    return data
+
+
+class SearchPapersTest(unittest.TestCase):
+    def test_maps_results_to_records(self):
+        http = FakeHttp(FakeResponse(200, _search_fixture()))
+        records = search_papers("quantum error correction surface code", http=http)
+
+        self.assertEqual(len(records), 2)
+        self.assertTrue(all(r.type == "paper" for r in records))
+        self.assertEqual(records[0].id, "W4400123456")
+        self.assertEqual(records[0].title, "Quantum error correction below the surface code threshold")
+        self.assertEqual(records[0].summary, "Quantum error correction below threshold")
+
+    def test_uses_title_and_abstract_filter_not_plain_search(self):
+        http = FakeHttp(FakeResponse(200, _search_fixture()))
+        search_papers("quantum error correction surface code", http=http)
+        url, kwargs = http.calls[0]
+        self.assertEqual(url, "https://api.openalex.org/works")
+        self.assertEqual(
+            kwargs["params"]["filter"],
+            "title_and_abstract.search:quantum error correction surface code",
+        )
+        self.assertNotIn("search", kwargs["params"])
+
+    def test_query_with_comma_is_quote_wrapped_for_openalex_filter_dsl(self):
+        # OpenAlex's filter=key:value1,value2 syntax treats a bare comma as a
+        # filter separator (confirmed live -- see search_papers's docstring),
+        # so a query containing one must be quote-wrapped to survive intact.
+        http = FakeHttp(FakeResponse(200, _search_fixture()))
+        search_papers("gradient descent, adaptive learning rate", http=http)
+        _, kwargs = http.calls[0]
+        self.assertEqual(
+            kwargs["params"]["filter"],
+            'title_and_abstract.search:"gradient descent, adaptive learning rate"',
+        )
+
+    def test_query_without_comma_is_not_quote_wrapped(self):
+        http = FakeHttp(FakeResponse(200, _search_fixture()))
+        search_papers("quantum error correction", http=http)
+        _, kwargs = http.calls[0]
+        self.assertEqual(kwargs["params"]["filter"], "title_and_abstract.search:quantum error correction")
+
+    def test_max_results_passed_as_per_page(self):
+        http = FakeHttp(FakeResponse(200, _search_fixture()))
+        search_papers("quantum error correction", max_results=3, http=http)
+        _, kwargs = http.calls[0]
+        self.assertEqual(kwargs["params"]["per-page"], 3)
+
+    def test_zero_results_returns_empty_list_not_error(self):
+        http = FakeHttp(FakeResponse(200, {"meta": {"count": 0}, "results": []}))
+        records = search_papers("a query nothing matches", http=http)
+        self.assertEqual(records, [])
+
+    def test_missing_abstract_yields_empty_summary(self):
+        http = FakeHttp(FakeResponse(200, _search_fixture()))
+        records = search_papers("quantum error correction surface code", http=http)
+        self.assertEqual(records[1].summary, "")
+
+    def test_non_200_raises_and_is_not_flagged_not_found(self):
+        http = FakeHttp(FakeResponse(500, {}))
+        with self.assertRaises(OpenAlexFetchError) as ctx:
+            search_papers("quantum error correction", http=http)
+        self.assertFalse(ctx.exception.not_found)
+
+    def test_mailto_env_var_included_as_param(self):
+        http = FakeHttp(FakeResponse(200, _search_fixture()))
+        with patch.dict("os.environ", {"OPENALEX_MAILTO": "me@example.com"}):
+            search_papers("quantum error correction", http=http)
+        _, kwargs = http.calls[0]
+        self.assertEqual(kwargs["params"]["mailto"], "me@example.com")
+
+
+class SearchPapersCachingTest(unittest.TestCase):
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        self.store = Store(Path(self._tmpdir.name) / "einstein.db", clock=lambda: "2026-08-08T00:00:00+00:00")
+        self.addCleanup(self.store.close)
+
+    def test_second_identical_search_reads_from_store_not_network(self):
+        http = FakeHttp(FakeResponse(200, _search_fixture()))
+        first = search_papers("quantum error correction surface code", http=http, store=self.store)
+        second = search_papers("quantum error correction surface code", http=http, store=self.store)
+
+        self.assertEqual(len(http.calls), 1, "second search must not re-hit the fake http client")
+        self.assertEqual([r.id for r in first], [r.id for r in second])
+
+    def test_zero_result_search_is_cached_as_negative_and_replayed(self):
+        http = FakeHttp(FakeResponse(200, {"meta": {"count": 0}, "results": []}))
+        first = search_papers("a query nothing matches", http=http, store=self.store)
+        second = search_papers("a query nothing matches", http=http, store=self.store)
+
+        self.assertEqual(first, [])
+        self.assertEqual(second, [])
+        self.assertEqual(len(http.calls), 1, "cached negative must not re-hit the network")
+
+    def test_error_is_cached_as_error_not_negative(self):
+        http = FakeHttp(FakeResponse(500, {}))
+        with self.assertRaises(OpenAlexFetchError):
+            search_papers("quantum error correction", http=http, store=self.store)
+
+        lookup = self.store.lookup_query(
+            source="openalex", query="quantum error correction", params={"max_results": 10}
+        )
+        self.assertEqual(lookup.status, "error")
+
+    def test_different_max_results_are_different_cache_entries(self):
+        http = FakeHttp(FakeResponse(200, _search_fixture()))
+        search_papers("quantum error correction surface code", max_results=5, http=http, store=self.store)
+        search_papers("quantum error correction surface code", max_results=10, http=http, store=self.store)
+        self.assertEqual(len(http.calls), 2)
+
+
+class SearchPapersMatchesSearchFnTest(unittest.TestCase):
+    """einstein-0.5's acceptance criterion: importable, passable as-is to
+    `novelty_auditor.audit_idea(search_papers=...)`, which calls
+    `search_papers(idea.method)` -- one positional query string, no other
+    arguments. This exercises exactly that call shape, with `requests`
+    itself faked out so no network call happens."""
+
+    def test_callable_with_no_arguments_but_the_query(self):
+        with patch("einstein.openalex_fetcher.requests") as fake_requests:
+            fake_requests.get.return_value = FakeResponse(200, _search_fixture())
+            records = search_papers("quantum error correction surface code")
+
+        self.assertIsInstance(records, list)
+        self.assertEqual(len(records), 2)
 
 
 if __name__ == "__main__":

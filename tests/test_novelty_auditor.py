@@ -294,5 +294,43 @@ class PriorArtMatchTest(unittest.TestCase):
         self.assertTrue(match.above_theta)
 
 
+class SearchPapersIntegrationTest(unittest.TestCase):
+    """einstein-0.5's acceptance criterion end to end: the real
+    `einstein.openalex_fetcher.search_papers` (network faked out) wired
+    straight into `audit_idea(search_papers=...)`, no adapter in between."""
+
+    def test_openalex_search_papers_plugs_directly_into_audit_idea(self):
+        from unittest.mock import patch
+
+        from einstein.openalex_fetcher import search_papers
+
+        unrelated_result = {
+            "meta": {"count": 1},
+            "results": [
+                {
+                    "id": "https://openalex.org/W1",
+                    "title": "Kubernetes deployment pipelines",
+                    "display_name": "Kubernetes deployment pipelines",
+                    "publication_date": "2026-01-01",
+                    "abstract_inverted_index": {"container": [0], "orchestration": [1]},
+                    "referenced_works": [],
+                }
+            ],
+        }
+
+        class FakeResponse:
+            status_code = 200
+
+            def json(self):
+                return unrelated_result
+
+        with patch("einstein.openalex_fetcher.requests") as fake_requests:
+            fake_requests.get.return_value = FakeResponse()
+            result = audit_idea(IDEA, search_papers=search_papers, search_patents=_one(UNRELATED_PATENT))
+
+        self.assertEqual(result.verdict, "pass")
+        self.assertEqual(result.queried_paper_ids, ("W1",))
+
+
 if __name__ == "__main__":
     unittest.main()
