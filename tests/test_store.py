@@ -126,6 +126,10 @@ class StoreTest(unittest.TestCase):
         with self.assertRaises(Exception):
             store.all_records()
 
+    def test_now_reads_the_injected_clock(self):
+        self.assertEqual(self.store.now(), "2026-08-08T00:00:00+00:00")
+        self.assertEqual(self.store.now(), "2026-08-09T00:00:00+00:00")
+
 
 class QueryCacheTest(unittest.TestCase):
     def setUp(self):

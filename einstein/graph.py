@@ -1,11 +1,12 @@
 """LangGraph state machine wiring: ingest -> analyze -> route -> agents -> END.
 
 This is the skeleton the rest of the agentic loop (einstein-15 ideator,
-einstein-16 novelty auditor, einstein-17 feasibility, einstein-18 codegen --
-see `bd show einstein-0`) plugs into. It does not implement any of those
-agents itself. The ``agents`` node here is a deterministic, LLM-free stub
-that records how many gaps it would have processed; a later bead replaces it
-by passing ``agent_node=`` to `build_graph`, not by editing this module.
+einstein-16 novelty auditor, einstein-17 feasibility, einstein-18 codegen,
+einstein-19 sandbox/self-heal -- see `bd show einstein-0`) plugs into. It
+does not implement any of those agents itself. The ``agents`` node here is a
+deterministic, LLM-free stub that records how many gaps it would have
+processed; a later bead replaces it by passing ``agent_node=`` to
+`build_graph`, not by editing this module.
 
 Nodes:
 
@@ -25,7 +26,22 @@ Nodes:
 
 OpenAlex (einstein/openalex_fetcher.py) is not wired into `ingest` -- it
 serves citation-edge lookups (einstein-6/12), a different role than the
-arXiv/GitHub/USPTO three-way matrix this graph drives.
+arXiv/GitHub/USPTO three-way matrix this graph drives. Method-domain
+cross-pollination detection (`einstein.cross_pollination`, einstein-12) is
+likewise not a node here: it is a paper x paper rule over an OpenAlex-id
+corpus, not this graph's paper x repo/patent matrix, and needs a second,
+caller-supplied domain corpus this graph's single `domain` query does not
+have. `einstein/cli.py`'s `run()` wires it as a separate, optional step
+alongside this graph, not inside it -- see that module's docstring
+(einstein-0.3) for why and how.
+
+`analyze` persists and dedupes its `gaps` against a `Store` when one is
+passed to `build_graph` (einstein-0.3): `snapshot_gaps` reads the seen-gaps
+table *before* this run's detections, `score_gaps` diffs the two (dormancy /
+rising-activity, `einstein.velocity`, einstein-13), and every gap is then
+upserted. `store=None` (the default, and every existing test's default)
+skips all of that and leaves `scored_gaps` empty -- same zero-behavior-change
+contract `embedder=None` already has for `detect_gaps`.
 """
 
 from __future__ import annotations
@@ -41,7 +57,9 @@ from einstein.embedding import Embedder
 from einstein.gaps import DEFAULT_PATENT_THRESHOLD, DEFAULT_REPO_THRESHOLD, Gap, detect_gaps
 from einstein.github_fetcher import fetch_repos as _fetch_repos
 from einstein.schema import Record
+from einstein.store import Store
 from einstein.uspto_fetcher import fetch_patents as _fetch_patents
+from einstein.velocity import ScoredGap, score_gaps, snapshot_gaps
 
 FetchPapersFn = Callable[[str], list[Record]]
 FetchReposFn = Callable[[str], list[Record]]
@@ -61,9 +79,24 @@ class AgentState(TypedDict):
     einstein-15 ideator node, `einstein.ideator.build_ideator_agent_node`,
     does). `audits` is the same story one stage later: only populated by
     the einstein-16 novelty auditor node,
-    `einstein.novelty_auditor.build_novelty_auditor_agent_node`. Both are
-    left untyped as `list` rather than `list[Idea]` / `list[Audit]` so this
-    module keeps zero import-time dependency on any specific agent's
+    `einstein.novelty_auditor.build_novelty_auditor_agent_node`.
+    `feasibility` is populated independently of `generated_code`, by the
+    einstein-17 feasibility node, `einstein.feasibility.build_feasibility_
+    agent_node` -- both consume `ideas`/`audits` directly and are siblings,
+    not a chain (see `einstein.feasibility`'s module docstring). `generated_
+    code` is one stage later still: only populated by the einstein-18
+    codegen node, `einstein.codegen.build_codegen_agent_node`.
+    `sandbox_outcomes` is one stage further: only populated by the
+    einstein-19 sandbox/self-heal node, `einstein.sandbox.
+    build_sandbox_agent_node`. `proposals` is the last stage: only
+    populated by the einstein-20 report node, `einstein.report.
+    build_report_agent_node` -- it correlates every prior field by
+    `gap_key` into one `Proposal` per `sandbox_outcomes` entry (see
+    `einstein.report`'s module docstring for why it iterates the sandbox
+    outcomes rather than the ideas or audits). All six are left untyped as
+    `list` rather than `list[Idea]` / `list[Audit]` / `list[Feasibility]` /
+    `list[GeneratedCode]` / `list[SandboxOutcome]` / `list[Proposal]` so
+    this module keeps zero import-time dependency on any specific agent's
     output type -- same reasoning the module docstring gives for not
     implementing the agents here.
     """
@@ -75,9 +108,14 @@ class AgentState(TypedDict):
     repos: list[Record]
     patents: list[Record]
     gaps: list[Gap]
+    scored_gaps: list[ScoredGap]
     agent_notes: list[str]
     ideas: list
     audits: list
+    feasibility: list
+    generated_code: list
+    sandbox_outcomes: list
+    proposals: list
 
 
 def initial_state(
@@ -95,9 +133,14 @@ def initial_state(
         repos=[],
         patents=[],
         gaps=[],
+        scored_gaps=[],
         agent_notes=[],
         ideas=[],
         audits=[],
+        feasibility=[],
+        generated_code=[],
+        sandbox_outcomes=[],
+        proposals=[],
     )
 
 
@@ -129,6 +172,7 @@ def build_graph(
     fetch_patents: FetchPatentsFn = _fetch_patents,
     embedder: Embedder | None = None,
     agent_node: AgentNodeFn = _default_agent_stub,
+    store: Store | None = None,
 ) -> CompiledStateGraph:
     """Compile the ingest -> analyze -> route -> agents -> END graph.
 
@@ -137,6 +181,12 @@ def build_graph(
     GitHub/USPTO fetchers, `embedder` defaults to `detect_gaps`'s own default
     (TF-IDF), and `agent_node` defaults to the LLM-free stub above. Tests
     pass fakes for all of them and never touch the network or an LLM.
+
+    `store`, if given, makes `analyze` persist and dedupe every detected gap
+    against it (see module docstring); `None` (the default) reproduces this
+    function's pre-einstein-0.3 behavior exactly. The `Store`'s lifecycle
+    (open/close) belongs to the caller -- this function only reads/writes it,
+    once per `analyze` call, and never closes it.
     """
 
     def ingest(state: AgentState) -> dict:
@@ -156,7 +206,14 @@ def build_graph(
             patent_threshold=state["patent_threshold"],
             embedder=embedder,
         )
-        return {"gaps": gaps}
+        if store is None:
+            return {"gaps": gaps}
+
+        previous = snapshot_gaps(store)
+        scored_gaps = score_gaps(previous, gaps, now=store.now())
+        for scored_gap in scored_gaps:
+            store.upsert_gap(scored_gap.gap.gap_key, scored_gap.gap.kind, scored_gap.gap.to_payload())
+        return {"gaps": gaps, "scored_gaps": scored_gaps}
 
     graph = StateGraph(AgentState)
     graph.add_node("ingest", ingest)

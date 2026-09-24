@@ -1,4 +1,4 @@
-"""GitHub repository search -> Record.
+"""GitHub repository search -> Record, and repo issues -> Issue.
 
 Uses the GitHub REST "search repositories" endpoint. `summary` is built from
 name + description + topics, matching the convention that a Record's text
@@ -8,12 +8,24 @@ payload.
 Auth is optional but strongly recommended: unauthenticated search is capped
 at 10 requests/minute (60/hour on the wider API), authenticated is 30/minute
 (5000/hour). Read from `GITHUB_TOKEN` if set.
+
+`fetch_issues` (einstein-9) hits a second endpoint, "list repository
+issues", for a single named repo. It deliberately does not return `Record`:
+an issue is not a paper/repo/patent (`einstein.schema.RecordType` is a closed
+`Literal` and stays that way -- see `einstein.gaps`'s own self-check, which
+asserts its output kinds are exactly `GAP_KINDS`, same closed-set discipline).
+`einstein.constraint_mining` is what turns an `Issue` into a `PainPoint`,
+the shape that module's clustering actually operates on. Same
+"extraction module, not a source-of-Records fetcher" role `einstein.
+arxiv_source` plays for arXiv e-prints -- no `Store` caching here either,
+for the same reason: there is no `Record` to hand back on a cache hit.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+from dataclasses import dataclass
 from typing import Any, Protocol
 
 import requests
@@ -24,8 +36,10 @@ from einstein.store import DEFAULT_NEGATIVE_TTL_DAYS, Store
 logger = logging.getLogger(__name__)
 
 GITHUB_SEARCH_URL = "https://api.github.com/search/repositories"
+GITHUB_ISSUES_URL_TEMPLATE = "https://api.github.com/repos/{repo}/issues"
 DEFAULT_TIMEOUT = 30
 SOURCE = "github"
+DEFAULT_ISSUE_LABELS: tuple[str, ...] = ("bug", "help wanted")
 
 
 class GitHubFetchError(Exception):
@@ -159,3 +173,96 @@ def fetch_repos(
         )
 
     return records
+
+
+@dataclass(frozen=True, slots=True)
+class Issue:
+    """One open GitHub issue, labeled the way `fetch_issues` was asked to
+    filter for -- a raw complaint/ask, not yet a `PainPoint`
+    (`einstein.constraint_mining` does that normalization).
+    """
+
+    repo: str
+    number: int
+    title: str
+    body: str
+    labels: tuple[str, ...]
+    url: str
+    ts: str
+
+
+def _to_issue(repo: str, item: dict[str, Any]) -> Issue:
+    labels = tuple(
+        label["name"] if isinstance(label, dict) else label for label in item.get("labels", [])
+    )
+    ts = item.get("updated_at") or item.get("created_at")
+    return Issue(
+        repo=repo,
+        number=item["number"],
+        title=item["title"],
+        body=item.get("body") or "",
+        labels=labels,
+        url=item["html_url"],
+        ts=ts,
+    )
+
+
+def fetch_issues(
+    repo: str,
+    *,
+    labels: tuple[str, ...] = DEFAULT_ISSUE_LABELS,
+    state: str = "open",
+    max_results: int = 30,
+    http: _HttpClient | None = None,
+) -> list[Issue]:
+    """List issues on `repo` (`"owner/name"`) matching ANY of `labels`.
+
+    GitHub's issues endpoint ANDs a comma-joined `labels` param (must carry
+    every listed label); this function wants a pain-point sweep across
+    *either* `"bug"` or `"help wanted"`, so it queries once per label and
+    de-duplicates by issue number, preserving first-seen order.
+
+    The endpoint also returns pull requests (a PR is an "issue" internally
+    to GitHub) -- items carrying a `"pull_request"` key are filtered out,
+    since a PR is not a reported pain point.
+
+    Raises `GitHubFetchError` on any non-200 response, same distinct-from-
+    zero-results contract `fetch_repos` documents; a label with zero open
+    matches is a normal `200` with an empty list, not an error.
+    """
+    client: _HttpClient = http if http is not None else requests
+    url = GITHUB_ISSUES_URL_TEMPLATE.format(repo=repo)
+    per_page = min(max_results, 100)
+
+    seen_numbers: set[int] = set()
+    issues: list[Issue] = []
+    for label in labels:
+        params = {"labels": label, "state": state, "per_page": per_page}
+        response = client.get(url, headers=_headers(), params=params, timeout=DEFAULT_TIMEOUT)
+
+        if response.status_code != 200:
+            rate_limited = _is_rate_limited(response)
+            message = (
+                f"GitHub issues fetch failed: {response.status_code} {response.reason} "
+                f"for repo={repo!r} label={label!r}"
+            )
+            if rate_limited:
+                reset = response.headers.get("X-RateLimit-Reset", "unknown")
+                logger.warning("%s (rate-limited, resets at epoch %s)", message, reset)
+            else:
+                logger.error(message)
+            raise GitHubFetchError(response.status_code, message, rate_limited=rate_limited)
+
+        items = response.json()
+        if not items:
+            logger.info("GitHub issues search returned zero results for repo=%r label=%r", repo, label)
+
+        for item in items:
+            if "pull_request" in item:
+                continue  # a PR, not a reported pain point
+            if item["number"] in seen_numbers:
+                continue  # already matched under a different label
+            seen_numbers.add(item["number"])
+            issues.append(_to_issue(repo, item))
+
+    return issues[:max_results]

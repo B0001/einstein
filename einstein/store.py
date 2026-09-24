@@ -158,6 +158,15 @@ class Store:
     def close(self) -> None:
         self._conn.close()
 
+    def now(self) -> str:
+        """This `Store`'s injected clock, for callers that need to score
+        against the same notion of "now" the upserts below it use (e.g.
+        `einstein.velocity.score_gaps`'s `now` parameter) -- reading the
+        wall clock separately would skew age calculations against whatever
+        clock a test injected here.
+        """
+        return self._clock()
+
     def __enter__(self) -> "Store":
         return self
 

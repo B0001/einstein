@@ -1,7 +1,10 @@
+import tempfile
 import unittest
+from pathlib import Path
 
 from einstein.graph import AgentState, build_graph, initial_state
 from einstein.schema import Record
+from einstein.store import Store
 
 
 def _paper(id_: str, title: str, summary: str) -> Record:
@@ -157,6 +160,76 @@ class GraphEndToEndTest(unittest.TestCase):
 
         self.assertEqual(result["gaps"], [])
         self.assertEqual(agent.calls, [])
+
+
+class StoreWiringTest(unittest.TestCase):
+    """einstein-0.3: `analyze` persists and dedupes gaps against a `Store`
+    when one is injected, and leaves behavior byte-for-byte unchanged when
+    it is not (the `store=None` default every other test in this file
+    exercises)."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmp.cleanup)
+        self.db_path = Path(self._tmp.name) / "einstein.db"
+
+    def _graph(self, papers, repos, *, store):
+        return build_graph(
+            fetch_papers=lambda domain: papers,
+            fetch_repos=lambda domain: repos,
+            fetch_patents=lambda domain: [],
+            store=store,
+        )
+
+    def test_store_none_leaves_scored_gaps_empty(self):
+        papers = [_paper("p2", "Tensor network attention", "novel tensor contraction for transformer attention")]
+        repos = [_repo("o/k8s-tool", "k8s-tool", "command line tool for kubernetes deployment pipelines")]
+
+        graph = self._graph(papers, repos, store=None)
+        result = graph.invoke(initial_state("optimization", repo_threshold=0.3, patent_threshold=0.3))
+
+        self.assertEqual(len(result["gaps"]), 2)
+        self.assertEqual(result["scored_gaps"], [])
+
+    def test_first_run_marks_every_gap_new_and_persists_it(self):
+        papers = [_paper("p2", "Tensor network attention", "novel tensor contraction for transformer attention")]
+        repos = [_repo("o/k8s-tool", "k8s-tool", "command line tool for kubernetes deployment pipelines")]
+
+        with Store(self.db_path) as store:
+            graph = self._graph(papers, repos, store=store)
+            result = graph.invoke(initial_state("optimization", repo_threshold=0.3, patent_threshold=0.3))
+
+            self.assertEqual(len(result["scored_gaps"]), 2)
+            self.assertTrue(all(sg.is_new and sg.trend == "new" for sg in result["scored_gaps"]))
+            stored_keys = {row["gap_key"] for row in store.all_gaps()}
+            self.assertEqual(stored_keys, {g.gap_key for g in result["gaps"]})
+
+    def test_second_run_on_the_same_store_sees_prior_gaps_as_not_new(self):
+        papers = [_paper("p2", "Tensor network attention", "novel tensor contraction for transformer attention")]
+        repos = [_repo("o/k8s-tool", "k8s-tool", "command line tool for kubernetes deployment pipelines")]
+
+        with Store(self.db_path) as store:
+            first_graph = self._graph(papers, repos, store=store)
+            first_graph.invoke(initial_state("optimization", repo_threshold=0.3, patent_threshold=0.3))
+
+            second_graph = self._graph(papers, repos, store=store)
+            result = second_graph.invoke(initial_state("optimization", repo_threshold=0.3, patent_threshold=0.3))
+
+            self.assertEqual(len(result["scored_gaps"]), 2)
+            self.assertTrue(all(not sg.is_new for sg in result["scored_gaps"]))
+            self.assertTrue(all(sg.age_days is not None and sg.age_days >= 0 for sg in result["scored_gaps"]))
+
+    def test_zero_gap_run_still_scores_an_empty_list_without_error(self):
+        papers = [_paper("p1", "SGD convergence bounds", "convergence bounds for stochastic gradient descent")]
+        repos = [_repo("o/sgd-bounds", "sgd-bounds", "convergence bounds for stochastic gradient descent")]
+
+        with Store(self.db_path) as store:
+            graph = self._graph(papers, repos, store=store)
+            result = graph.invoke(initial_state("optimization", repo_threshold=0.3, patent_threshold=0.3))
+
+            self.assertEqual(result["gaps"], [])
+            self.assertEqual(result["scored_gaps"], [])
+            self.assertEqual(store.all_gaps(), [])
 
 
 if __name__ == "__main__":

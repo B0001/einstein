@@ -22,6 +22,7 @@ wheels/
 
 .beads/interactions.jsonl
 .claude/settings.json
+.claude/*.local.json
 
 
 # Emacs lock/autosave files

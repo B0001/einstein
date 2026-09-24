@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from einstein.github_fetcher import GitHubFetchError, fetch_repos
+from einstein.github_fetcher import GitHubFetchError, fetch_issues, fetch_repos
 from einstein.store import Store
 
 FIXTURES_DIR = Path(__file__).parent / "fixtures"
@@ -224,6 +224,124 @@ class FetchReposCachingTest(unittest.TestCase):
         records = fetch_repos("qiskit", http=http)
         self.assertEqual(len(records), 1)
         self.assertEqual(records[0].id, "qiskit/qiskit")
+
+
+BUG_ISSUE = {
+    "number": 42,
+    "title": "OOM above 8k context",
+    "body": "Running out of memory whenever input exceeds 8192 tokens.",
+    "html_url": "https://github.com/someone/lib/issues/42",
+    "labels": [{"name": "bug"}],
+    "updated_at": "2026-08-01T12:00:00Z",
+    "created_at": "2026-07-01T12:00:00Z",
+}
+
+HELP_WANTED_ISSUE = {
+    "number": 43,
+    "title": "Docs for sparse attention config",
+    "body": "Needs documentation.",
+    "html_url": "https://github.com/someone/lib/issues/43",
+    "labels": [{"name": "help wanted"}],
+    "updated_at": "2026-08-02T12:00:00Z",
+    "created_at": "2026-07-02T12:00:00Z",
+}
+
+PR_ITEM = {
+    "number": 44,
+    "title": "Fix typo",
+    "body": "",
+    "html_url": "https://github.com/someone/lib/pull/44",
+    "labels": [{"name": "bug"}],
+    "updated_at": "2026-08-03T12:00:00Z",
+    "created_at": "2026-07-03T12:00:00Z",
+    "pull_request": {"url": "https://api.github.com/repos/someone/lib/pulls/44"},
+}
+
+
+class FakeSequentialHttp:
+    """Returns one canned response per call, in order -- for endpoints
+    `fetch_issues` calls once per label."""
+
+    def __init__(self, responses):
+        self.responses = list(responses)
+        self.calls = []
+
+    def get(self, url, **kwargs):
+        self.calls.append((url, kwargs))
+        return self.responses[len(self.calls) - 1]
+
+
+class FetchIssuesTest(unittest.TestCase):
+    def test_maps_items_to_issues(self):
+        http = FakeSequentialHttp(
+            [FakeResponse(200, [BUG_ISSUE]), FakeResponse(200, [])]
+        )
+        issues = fetch_issues("someone/lib", http=http)
+
+        self.assertEqual(len(issues), 1)
+        issue = issues[0]
+        self.assertEqual(issue.repo, "someone/lib")
+        self.assertEqual(issue.number, 42)
+        self.assertEqual(issue.title, "OOM above 8k context")
+        self.assertIn("Running out of memory", issue.body)
+        self.assertEqual(issue.labels, ("bug",))
+        self.assertEqual(issue.url, "https://github.com/someone/lib/issues/42")
+
+    def test_queries_once_per_label(self):
+        http = FakeSequentialHttp(
+            [FakeResponse(200, [BUG_ISSUE]), FakeResponse(200, [HELP_WANTED_ISSUE])]
+        )
+        issues = fetch_issues("someone/lib", http=http)
+
+        self.assertEqual(len(http.calls), 2)
+        labels_queried = {kwargs["params"]["labels"] for _, kwargs in http.calls}
+        self.assertEqual(labels_queried, {"bug", "help wanted"})
+        self.assertEqual({i.number for i in issues}, {42, 43})
+
+    def test_deduplicates_issue_matched_under_multiple_labels(self):
+        both_labels_issue = dict(BUG_ISSUE, labels=[{"name": "bug"}, {"name": "help wanted"}])
+        http = FakeSequentialHttp(
+            [FakeResponse(200, [both_labels_issue]), FakeResponse(200, [both_labels_issue])]
+        )
+        issues = fetch_issues("someone/lib", http=http)
+        self.assertEqual(len(issues), 1)
+
+    def test_pull_requests_are_filtered_out(self):
+        http = FakeSequentialHttp(
+            [FakeResponse(200, [BUG_ISSUE, PR_ITEM]), FakeResponse(200, [])]
+        )
+        issues = fetch_issues("someone/lib", http=http)
+        self.assertEqual([i.number for i in issues], [42])
+
+    def test_zero_results_returns_empty_list_without_raising(self):
+        http = FakeSequentialHttp([FakeResponse(200, []), FakeResponse(200, [])])
+        issues = fetch_issues("someone/empty-repo", http=http)
+        self.assertEqual(issues, [])
+
+    def test_non_200_raises_distinct_error_not_empty_list(self):
+        http = FakeSequentialHttp([FakeResponse(500, [], reason="Internal Server Error")])
+        with self.assertRaises(GitHubFetchError) as ctx:
+            fetch_issues("someone/lib", http=http)
+        self.assertEqual(ctx.exception.status_code, 500)
+
+    def test_429_raises_and_is_flagged_rate_limited(self):
+        http = FakeSequentialHttp([FakeResponse(429, [], reason="Too Many Requests")])
+        with self.assertRaises(GitHubFetchError) as ctx:
+            fetch_issues("someone/lib", http=http)
+        self.assertTrue(ctx.exception.rate_limited)
+
+    def test_custom_labels_are_queried(self):
+        http = FakeSequentialHttp([FakeResponse(200, [])])
+        fetch_issues("someone/lib", labels=("bug",), http=http)
+        self.assertEqual(len(http.calls), 1)
+        self.assertEqual(http.calls[0][1]["params"]["labels"], "bug")
+
+    def test_max_results_truncates_across_labels(self):
+        items_bug = [dict(BUG_ISSUE, number=i, html_url=f"https://x/{i}") for i in range(3)]
+        items_help = [dict(HELP_WANTED_ISSUE, number=i + 100, html_url=f"https://x/{i + 100}") for i in range(3)]
+        http = FakeSequentialHttp([FakeResponse(200, items_bug), FakeResponse(200, items_help)])
+        issues = fetch_issues("someone/lib", max_results=4, http=http)
+        self.assertEqual(len(issues), 4)
 
 
 if __name__ == "__main__":

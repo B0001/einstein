@@ -36,6 +36,71 @@ docstring). A live fetch failure (rate limit, missing `USPTO_API_KEY`,
 unreachable API) exits nonzero with **no report at all** — a report built on
 a partially-failed ingest is worse than no report.
 
+### Gap persistence + velocity (`einstein-0.3`)
+
+```bash
+uv run einstein "stochastic gradient descent" --db einstein.db
+```
+
+Every invocation opens a `Store` at `--db` (default `einstein.db`, relative to
+cwd, gitignored) and dedupes that run's gaps against every prior run's via
+`einstein/velocity.py`. Each gap in the report carries a `velocity` field —
+`is_new` / `trend` (`new` / `rising` / `dormant` / `stable`) / `age_days` /
+`similarity_delta` — instead of every run looking like the first. Point
+`--db` at the same file across scheduled runs to get real dedup/velocity;
+a fresh path per run (or `:memory:`-equivalent behavior) makes every run
+"new" again.
+
+### Cross-pollination (`--cross-pollinate`, `einstein-12`/`einstein-0.3`)
+
+```bash
+uv run einstein "tensor network contraction" --cross-pollinate "protein folding"
+```
+
+`einstein/cross_pollination.py` is a paper x paper rule ("has method M been
+applied to domain B, per the citation graph this run fetched") — structurally
+different from the paper x repo/patent rule the rest of this CLI runs, and it
+needs a second corpus this CLI otherwise has no concept of. It is **off by
+default**: it re-fetches both `domain` and `--cross-pollinate`'s argument as
+fresh OpenAlex paper corpora (not the arXiv-fetched `papers` from the main
+run — cross-pollination needs both sides in OpenAlex's id space, see the
+module docstring) and fetches citation edges one call per unique DOI across
+both corpora, which is real, additional API load. Papers OpenAlex has no DOI
+for are counted (`papers_without_doi`) and skipped, never silently dropped.
+Candidates are persisted and velocity-scored through the same `--db` Store
+as the main gaps, under `kind: "cross_pollination"`. `--cross-pollination-threshold`
+sets the cosine-similarity floor for a candidate (default matches
+`einstein.cross_pollination.DEFAULT_SIMILARITY_THRESHOLD`).
+
+### Constraint & friction mining (`--mine-constraints`, `einstein-9`/`einstein-0.7`)
+
+```bash
+uv run einstein "stochastic gradient descent" --mine-constraints someone/transformer-lib
+```
+
+`einstein/constraint_mining.py` scrapes Limitations/Future Work sections out
+of this run's papers (a live per-paper e-print fetch via
+`einstein.arxiv_source.extract_source`) and `bug`/`help wanted` issues off
+each named repo (`einstein.github_fetcher.fetch_issues`), then single-link
+clusters the combined pain points by cosine similarity. It is **off by
+default**: it is real, additional API load (one e-print fetch per paper in
+the run, one issues fetch per `--mine-constraints` repo) on top of the main
+query. Repeat the flag for more than one repo
+(`--mine-constraints a/b --mine-constraints c/d`); every repo named must
+already be part of this run's fetched corpus (i.e. surfaced by the main
+`domain` search), or the run fails with no partial report, same "no partial
+report on a live-fetch failure" contract the three main sources have. A
+paper with no LaTeX source on arXiv (`NoTexSourceError`) is counted
+(`papers_without_tex_source`) and skipped, not treated as a failure. Only
+clusters spanning >1 distinct source ("widespread") are rendered — friction
+reported in more than one paper/repo is a stronger signal than friction
+reported once, never a severity or unsolved-elsewhere claim. Widespread
+clusters are persisted and velocity-scored through the same `--db` Store as
+the main gaps, under `kind: "constraint_cluster"`.
+`--constraint-similarity-threshold` sets the cosine-similarity floor for
+clustering (default matches
+`einstein.constraint_mining.DEFAULT_SIMILARITY_THRESHOLD`).
+
 ### Scheduled runs
 
 Two ways to run this on a schedule, per the bead's own note — cron/Actions
