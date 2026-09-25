@@ -183,7 +183,9 @@ to the nearest 5.3-pt step):
 | Abstention rate (all three arms, threshold=0.20) | 0% (margin=0 forces every score to a match/gap call, never `"abstain"` — see `classify` in `einstein/gap_benchmark.py`) |
 
 The negative arm alone looks clean — every genuinely unrelated pair scores
-below 0.02 cosine similarity, comfortably separated from threshold. The
+below 0.03 cosine similarity, comfortably separated from threshold, and all
+but one below 0.02 (the exception, WGAN `1701.07875` vs. the campsite finder
+`juftin/camply`, scores 0.021 on the single shared word "like"). The
 positive arm is where the claim breaks: **3 of the 19 known paper&harr;repo
 links score exactly 0.0 similarity** (`2102.12092`/DALL-E,
 `2010.11929`/ViT, `1701.07875`/WGAN vs. their own repos) — zero shared
@@ -193,7 +195,7 @@ the abstract in words a TF-IDF vectorizer can see. That sets a **floor false
 discovery rate of 16% (3/19) at every threshold above 0**, no matter where
 the line is drawn — raising the threshold only trades more false discoveries
 for no additional correctly-flagged negatives (the negative arm is already
-saturated at 100% by threshold 0.02).
+saturated at 100% by threshold 0.03).
 
 **Adjacent arm, and which hypothesis it supports.** At the shipped default
 (threshold=0.20) the adjacent arm has caught up to the cooking arm: both
@@ -206,22 +208,24 @@ not evidence for either hypothesis: by threshold 0.05 both arms are already
 pinned at 1.00, so nothing above that threshold — including the shipped
 0.20 — can tell "opportunity" and "topic distance" apart. The divergence
 `einstein-0.4` was filed to look for shows up **below** the shipped default,
-in the 0.01–0.04 band, where the cooking arm has already saturated but the
-adjacent arm has not:
+in the 0.01–0.04 band, where the cooking arm is at or near saturation but
+the adjacent arm is not:
 
 | threshold | flag_rate (cooking) | adjacent_flag_rate | resolution |
 |---|---|---|---|
 | 0.01 | 79% | 32% (6/19) | 1 sample = 5.3 pts |
-| 0.02 | 100% | 37% (7/19) | 1 sample = 5.3 pts |
+| 0.02 | 95% (18/19) | 37% (7/19) | 1 sample = 5.3 pts |
 | 0.03 | 100% | 63% (12/19) | 1 sample = 5.3 pts |
 | 0.04 | 100% | 84% (16/19) | 1 sample = 5.3 pts |
 | 0.05 | 100% | 100% (19/19) | 1 sample = 5.3 pts |
 
 At threshold=0.02 specifically — the point `tests/test_gap_benchmark.py`'s
 `test_floor_false_discovery_rate_at_threshold_0_02` asserts directly — the
-cooking arm's flag_rate is already 1.00 while the adjacent arm sits at
+cooking arm's flag_rate is 18/19 = 0.947 while the adjacent arm sits at
 7/19 = 0.368, a real collapse, not noise at this corpus's 5.3-pt
-resolution. Per `einstein-0.4`'s own framing ("if flag_rate collapses here
+resolution. (Earlier revisions of this section and the einstein-0.1/0.6
+handoffs said 1.00 here; regenerating with the command above on the
+checked-in corpus and locked dependencies gives 18/19.) Per `einstein-0.4`'s own framing ("if flag_rate collapses here
 while staying 1.00 on the cooking arm, the score is topic distance, not
 opportunity"), **this result supports TOPIC DISTANCE**: shared ML/CS jargon
 between a paper and an unrelated adjacent-subfield repo measurably inflates

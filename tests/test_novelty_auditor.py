@@ -5,7 +5,6 @@ against re-queried papers and patent claims, no network and no real LLM
 
 import unittest
 
-from einstein.gaps import Gap, Match
 from einstein.graph import AgentState, initial_state
 from einstein.ideator import Idea
 from einstein.novelty_auditor import (

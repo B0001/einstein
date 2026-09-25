@@ -18,7 +18,8 @@ so this module and its tests touch no network) has three arms:
   woodworking, ...) -- genuinely unconnected by construction, not merely
   "not the right repo." Ground-truth gaps: the detector should flag every one.
   einstein-0.4: this arm alone is saturated (flag_rate=1.00 at every
-  threshold from 0.02 up) because TF-IDF trivially separates ML/CS
+  threshold from 0.03 up; 18/19 at 0.02, the one miss being a single shared
+  word, see tests/test_gap_benchmark.py) because TF-IDF trivially separates ML/CS
   vocabulary from cooking vocabulary -- it cannot distinguish "the score
   measures opportunity" from "the score measures topic distance," since
   both hypotheses predict the same 1.00.

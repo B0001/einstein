@@ -249,16 +249,32 @@ class RealCorpusMeasurementTest(unittest.TestCase):
         # 3 of 19 known paper<->repo links score exactly 0 similarity against
         # their own repo -- zero lexical overlap between abstract and README
         # -- which sets a floor no threshold above 0 can clear. At this same
-        # threshold, the cooking arm is already saturated (flag_rate=1.0)
+        # threshold, the cooking arm is at 18/19 (0.947; the one miss is
+        # pinned by test_only_cooking_arm_miss_at_0_02_is_wgan_vs_camply)
         # while the adjacent-domain arm is nowhere close (7/19 = 0.368) --
-        # this is the collapse einstein-0.4 was filed to look for: the
-        # cooking-only arm's "flag_rate=1.0 at threshold=0.02" was measuring
-        # topic distance, not opportunity.
+        # this is the collapse einstein-0.4 was filed to look for.
+        #
+        # einstein-0.1/0.6's handoffs recorded flag_rate=1.00 here, but with
+        # this checked-in corpus and the uv.lock-pinned embedder it measures
+        # 18/19, including on the pre-einstein-0.4 commit (so the adjacent
+        # arm joining the shared TF-IDF fit is not the cause). The assertion
+        # follows the measurement, per this class's docstring.
         reports = sweep(self.positive, self.negative, self.adjacent, thresholds=[0.02], margins=[0.0])
         report = reports[0]
         self.assertAlmostEqual(report.false_discovery_rate, 3 / 19, places=4)
-        self.assertAlmostEqual(report.flag_rate, 1.0, places=4)
+        self.assertAlmostEqual(report.flag_rate, 18 / 19, places=4)
         self.assertAlmostEqual(report.adjacent_flag_rate, 7 / 19, places=4)
+
+    def test_only_cooking_arm_miss_at_0_02_is_wgan_vs_camply(self):
+        # WGAN (1701.07875) vs. juftin/camply (a campsite finder) share
+        # exactly one non-stop-word, "like", worth 0.0212 cosine -- just over
+        # 0.02. Every other cooking-arm pair is below 0.02, and all 19 are
+        # below 0.03, which is where the cooking arm actually saturates.
+        embedder = _fit_shared_embedder(self.positive, self.negative, None, self.adjacent)
+        scores = score_pairs(self.negative, embedder)
+        at_or_above = [(p.paper.id, p.repo.id) for p, s in zip(self.negative, scores) if s >= 0.02]
+        self.assertEqual(at_or_above, [("1701.07875v3", "juftin/camply")])
+        self.assertLess(max(scores), 0.03)
 
     def test_adjacent_arm_reaches_saturation_at_shipped_default_threshold(self):
         # At einstein.gaps.DEFAULT_REPO_THRESHOLD (0.2), the adjacent arm has
