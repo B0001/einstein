@@ -150,10 +150,28 @@ class AuditIdeaVerdictTest(unittest.TestCase):
         self.assertEqual(result.patent_match.claim_number, 1)
         self.assertFalse(result.patent_match.above_theta)
 
-    def test_no_candidates_at_all_is_a_pass_with_empty_ids(self):
+    def test_empty_paper_search_is_unsearched_not_pass(self):
+        # einstein-av1: with zero candidate papers nothing can reach theta, so
+        # "pass" would certify an absence of prior art nobody looked for.
+        llm = StubLLM()
+        result = audit_idea(IDEA, search_papers=_none, search_patents=_one(UNRELATED_PATENT), llm=llm)
+
+        self.assertEqual(result.verdict, "unsearched")
+        self.assertNotEqual(result.verdict, "pass")
+        self.assertEqual(result.queried_paper_ids, ())
+        self.assertIn("NOT a pass", result.note)
+        self.assertNotIn("not a novelty claim", result.note)
+        self.assertEqual(result.rationale, "")
+        self.assertEqual(llm.prompts, [], "nothing to narrate for an unsearched verdict")
+
+    def test_empty_paper_search_still_rejects_on_a_conflicting_patent_claim(self):
+        result = audit_idea(IDEA, search_papers=_none, search_patents=_one(CONFLICTING_PATENT), theta=0.6)
+        self.assertEqual(result.verdict, "reject")
+
+    def test_no_candidates_at_all_is_unsearched_with_empty_ids(self):
         result = audit_idea(IDEA, search_papers=_none, search_patents=_none)
 
-        self.assertEqual(result.verdict, "pass")
+        self.assertEqual(result.verdict, "unsearched")
         self.assertEqual(result.queried_paper_ids, ())
         self.assertEqual(result.queried_patent_ids, ())
         self.assertIsNone(result.paper_match.best_id)
@@ -268,6 +286,18 @@ class BuildNoveltyAuditorAgentNodeTest(unittest.TestCase):
         self.assertEqual(result["audits"][0].verdict, "pass")
         self.assertEqual(len(result["agent_notes"]), 1)
         self.assertIn("1 audit(s) from 1 idea(s)", result["agent_notes"][0])
+
+    def test_node_flags_each_unsearched_audit_in_agent_notes(self):
+        node = build_novelty_auditor_agent_node(search_papers=_none, search_patents=_one(UNRELATED_PATENT))
+        state: AgentState = initial_state("optimization")
+        state["ideas"] = [IDEA]
+
+        result = node(state)
+
+        self.assertEqual(result["audits"][0].verdict, "unsearched")
+        self.assertEqual(len(result["agent_notes"]), 2)
+        self.assertIn(IDEA.subject_id, result["agent_notes"][1])
+        self.assertIn("do not treat as a pass", result["agent_notes"][1])
 
     def test_node_on_zero_ideas_returns_empty_audits_and_summary_note(self):
         node = build_novelty_auditor_agent_node(search_papers=_one(UNRELATED_PAPER), search_patents=_one(UNRELATED_PATENT))

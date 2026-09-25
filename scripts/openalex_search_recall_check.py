@@ -1,7 +1,15 @@
-"""One-time, hand-run script: compare OpenAlex's `/works?search=` (full-text)
-against `/works?filter=title_and_abstract.search:` (title+abstract only) for
+"""Hand-run script: compare OpenAlex's `/works?search=` (relevance-ranked)
+against `/works?filter=title_and_abstract.search:` (every term must match) for
 method-text queries, to justify which one `einstein.openalex_fetcher.search_papers`
-(einstein-0.5) uses.
+uses.
+
+einstein-0.5 ran this on the two short QUERIES below and picked the filter.
+einstein-av1 added PARAGRAPHS -- method paragraphs shaped like the
+`idea.method` text `novelty_auditor.audit_idea` actually sends -- where the
+filter collapses to zero hits, and switched `search_papers` to `search=`. The
+paragraph check sends exactly what `search_papers` sends (`_search_value`), and
+then calls `search_papers` itself, so a count > 0 there is the acceptance check
+"a realistic method paragraph retrieves > 0 papers".
 
 This is NOT part of the test suite -- it hits the live OpenAlex API and is
 subject to its rate limits (anonymous search gets 429'd hard; this script
@@ -25,6 +33,20 @@ MAILTO = "einstein-recall-check@example.com"
 QUERIES = [
     "tensor network contraction for transformer attention",
     "quantum error correction surface code",
+]
+
+PARAGRAPHS = [
+    (
+        "Approximate the softmax attention matrix of a transformer as a low bond dimension "
+        "matrix product state, and contract the resulting tensor network left to right so that "
+        "attention over a sequence of length n costs linear rather than quadratic time, "
+        "truncating singular values adaptively to keep the approximation error bounded."
+    ),
+    (
+        "Train a graph neural network on molecular graphs to predict DFT-level energies, then use "
+        "its uncertainty estimates to decide which new conformations to label with density "
+        "functional theory in an active learning loop."
+    ),
 ]
 
 
@@ -68,6 +90,21 @@ def _run_comma_check() -> None:
     print()
 
 
+def _run_paragraph_check() -> None:
+    from einstein.openalex_fetcher import _search_value, search_papers
+
+    for paragraph in PARAGRAPHS:
+        sent = _search_value(paragraph)
+        print(f"=== paragraph ({len(sent.split())} words): {paragraph[:70]!r}... ===")
+        _run_one(sent, {"search": sent}, "search= (what search_papers sends)")
+        _run_one(sent, {"filter": f"title_and_abstract.search:{sent}"}, "title_and_abstract.search filter (old)")
+        records = search_papers(paragraph, mailto=MAILTO)
+        print(f"  [search_papers] returned {len(records)} record(s)")
+        for record in records[:5]:
+            print(f"    - {record.id} {record.title!r}")
+        print()
+
+
 def main() -> None:
     for query in QUERIES:
         print(f"=== {query!r} ===")
@@ -75,6 +112,7 @@ def main() -> None:
         _run_one(query, {"filter": f"title_and_abstract.search:{query}"}, "title_and_abstract.search filter")
         print()
     _run_comma_check()
+    _run_paragraph_check()
 
 
 if __name__ == "__main__":

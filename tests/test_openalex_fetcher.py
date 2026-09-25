@@ -256,34 +256,48 @@ class SearchPapersTest(unittest.TestCase):
         self.assertEqual(records[0].title, "Quantum error correction below the surface code threshold")
         self.assertEqual(records[0].summary, "Quantum error correction below threshold")
 
-    def test_uses_title_and_abstract_filter_not_plain_search(self):
+    def test_uses_relevance_ranked_search_not_all_terms_filter(self):
+        # einstein-av1: the title_and_abstract.search filter requires every
+        # term to match and returned [] for paragraph-length method text.
         http = FakeHttp(FakeResponse(200, _search_fixture()))
         search_papers("quantum error correction surface code", http=http)
         url, kwargs = http.calls[0]
         self.assertEqual(url, "https://api.openalex.org/works")
-        self.assertEqual(
-            kwargs["params"]["filter"],
-            "title_and_abstract.search:quantum error correction surface code",
-        )
-        self.assertNotIn("search", kwargs["params"])
+        self.assertEqual(kwargs["params"]["search"], "quantum error correction surface code")
+        self.assertNotIn("filter", kwargs["params"])
 
-    def test_query_with_comma_is_quote_wrapped_for_openalex_filter_dsl(self):
-        # OpenAlex's filter=key:value1,value2 syntax treats a bare comma as a
-        # filter separator (confirmed live -- see search_papers's docstring),
-        # so a query containing one must be quote-wrapped to survive intact.
+    def test_comma_is_dropped_not_quote_wrapped(self):
+        # Quotes mean exact phrase in search=, which would bring back the
+        # zero-recall failure; the comma only needed quoting under filter=.
         http = FakeHttp(FakeResponse(200, _search_fixture()))
         search_papers("gradient descent, adaptive learning rate", http=http)
         _, kwargs = http.calls[0]
+        self.assertEqual(kwargs["params"]["search"], "gradient descent adaptive learning rate")
+
+    def test_query_syntax_in_prose_is_neutralized(self):
+        http = FakeHttp(FakeResponse(200, _search_fixture()))
+        search_papers('Use "sparse" attention (NOT dense) AND low-rank updates.', http=http)
+        _, kwargs = http.calls[0]
+        self.assertEqual(kwargs["params"]["search"], "use sparse attention not dense and low rank updates")
+
+    def test_paragraph_query_is_sent_whole(self):
+        paragraph = (
+            "We contract the attention tensor as a matrix product state, truncating bond "
+            "dimension adaptively; this replaces the quadratic softmax with a linear-time sweep."
+        )
+        http = FakeHttp(FakeResponse(200, _search_fixture()))
+        search_papers(paragraph, http=http)
+        _, kwargs = http.calls[0]
         self.assertEqual(
-            kwargs["params"]["filter"],
-            'title_and_abstract.search:"gradient descent, adaptive learning rate"',
+            kwargs["params"]["search"],
+            "we contract the attention tensor as a matrix product state truncating bond dimension "
+            "adaptively this replaces the quadratic softmax with a linear time sweep",
         )
 
-    def test_query_without_comma_is_not_quote_wrapped(self):
+    def test_query_with_no_words_returns_empty_without_network(self):
         http = FakeHttp(FakeResponse(200, _search_fixture()))
-        search_papers("quantum error correction", http=http)
-        _, kwargs = http.calls[0]
-        self.assertEqual(kwargs["params"]["filter"], "title_and_abstract.search:quantum error correction")
+        self.assertEqual(search_papers(" ,;!? ", http=http), [])
+        self.assertEqual(http.calls, [])
 
     def test_max_results_passed_as_per_page(self):
         http = FakeHttp(FakeResponse(200, _search_fixture()))
@@ -345,9 +359,21 @@ class SearchPapersCachingTest(unittest.TestCase):
             search_papers("quantum error correction", http=http, store=self.store)
 
         lookup = self.store.lookup_query(
-            source="openalex", query="quantum error correction", params={"max_results": 10}
+            source="openalex", query="quantum error correction", params={"max_results": 10, "param": "search"}
         )
         self.assertEqual(lookup.status, "error")
+
+    def test_negative_cached_by_the_old_filter_search_is_not_replayed(self):
+        # A pre-einstein-av1 zero-result row (keyed on max_results alone) must
+        # not answer for the new search= query.
+        self.store.upsert_query(
+            source="openalex", query="quantum error correction surface code",
+            params={"max_results": 10}, status="ok", record_type="paper", ids=[],
+        )
+        http = FakeHttp(FakeResponse(200, _search_fixture()))
+        records = search_papers("quantum error correction surface code", http=http, store=self.store)
+        self.assertEqual(len(http.calls), 1)
+        self.assertEqual(len(records), 2)
 
     def test_different_max_results_are_different_cache_entries(self):
         http = FakeHttp(FakeResponse(200, _search_fixture()))

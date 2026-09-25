@@ -15,7 +15,9 @@ bead's own description) is read literally: only an `Audit` with
 verdict=="pass" has survived the adversarial novelty check. A
 "force_pivot" idea was told its method is crowded by prior art and needs
 to differentiate before it is worth building; a "reject" idea was flagged
-as a candidate infringement risk. Generating code for either before that
+as a candidate infringement risk; an "unsearched" idea (empty paper
+re-query, einstein-av1) was never checked against prior art at all.
+Generating code for any of them before that
 is resolved would ship a reference implementation of exactly the thing
 just flagged -- so `generate_code` asserts verdict == "pass" (same
 defensive-assert pattern as `einstein.ideator.ideate_gap` asserting

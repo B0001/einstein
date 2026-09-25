@@ -16,7 +16,9 @@ its `Audit` (einstein-16) directly -- same signature shape as
 for the same reason codegen does: a force_pivot idea needs to differentiate
 from prior art first, a reject idea is a candidate infringement risk, and
 spending compute/data/blueprint judgment on either would be assessing the
-feasibility of a proposal that is not going forward as-is. `gemini_convo.md`
+feasibility of a proposal that is not going forward as-is. An "unsearched"
+idea (the paper re-query came back empty, einstein-av1) is refused for the
+same reason: it has not been checked against prior art at all. `gemini_convo.md`
 draws the same edge in its own diagram: the Feasibility box only receives
 the "Novel Concept" branch out of the Novelty Auditor, never the "Prior Art
 Found" branch.

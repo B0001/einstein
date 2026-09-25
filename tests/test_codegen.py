@@ -122,6 +122,18 @@ class GenerateCodeTest(unittest.TestCase):
         with self.assertRaises(AssertionError):
             generate_code(IDEA, _audit(verdict="reject"), llm=StubLLM(WELL_FORMED_RESPONSE))
 
+    def test_unsearched_audit_raises_assertion_error(self):
+        with self.assertRaises(AssertionError):
+            generate_code(IDEA, _audit(verdict="unsearched"), llm=StubLLM(WELL_FORMED_RESPONSE))
+
+    def test_unsearched_audit_is_skipped_by_batch_with_a_note(self):
+        llm = StubLLM(WELL_FORMED_RESPONSE)
+        generated, notes = generate([IDEA], [_audit(verdict="unsearched")], llm=llm)
+        self.assertEqual(generated, [])
+        self.assertEqual(llm.prompts, [])
+        self.assertEqual(len(notes), 1)
+        self.assertIn("unsearched", notes[0])
+
     def test_mismatched_gap_key_raises_assertion_error(self):
         mismatched = _audit(gap_key="true_invention_gap:paper:9999999")
         with self.assertRaises(AssertionError):

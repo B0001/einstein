@@ -223,6 +223,15 @@ class BuildProposalsTest(unittest.TestCase):
         self.assertEqual(len(notes), 1)
         self.assertIn("pairing bug", notes[0])
 
+    def test_unsearched_audit_is_never_reported_as_a_proposal(self):
+        proposals, notes = build_proposals(
+            [GAP], [IDEA], [_audit(verdict="unsearched")], [], [_generated()], [_outcome()]
+        )
+
+        self.assertEqual(proposals, [])
+        self.assertEqual(len(notes), 1)
+        self.assertIn("unsearched", notes[0])
+
     def test_empty_inputs_returns_empty(self):
         proposals, notes = build_proposals([], [], [], [], [], [])
         self.assertEqual(proposals, [])

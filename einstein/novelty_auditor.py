@@ -56,6 +56,19 @@ entirely).
 A "pass" verdict is never phrased as novelty. It means: nothing in the
 freshly re-queried papers/patents scored >= theta. That is "no match found
 within this search, these sources, this threshold" -- see `Audit.note`.
+
+An empty paper re-query is NOT a pass (einstein-av1). With zero candidate
+papers nothing can score >= theta, so "pass" would be vacuous: it would
+certify an absence of prior art that was never looked for. That is exactly
+what happened in practice -- the OpenAlex backend's old every-term-must-
+match filter returned `[]` for paragraph-length `idea.method` queries (see
+`einstein.openalex_fetcher`'s module docstring) -- so an empty paper search
+gets its own verdict, "unsearched", which every downstream consumer
+(feasibility, codegen, report) already skips because they only proceed on
+verdict == "pass". A patent-claim match above theta still wins and
+REJECTs even when the paper search came back empty: that is positive
+evidence, and does not depend on the paper side at all. The LLM is not
+called for "unsearched" -- there is no prior art to narrate.
 """
 
 from __future__ import annotations
@@ -73,7 +86,7 @@ from einstein.patent_claims import ClaimsNotFoundError, independent_claims_for_r
 from einstein.schema import Record
 from einstein.uspto_fetcher import fetch_patents as _fetch_patents
 
-NoveltyVerdict = Literal["pass", "force_pivot", "reject"]
+NoveltyVerdict = Literal["pass", "force_pivot", "reject", "unsearched"]
 NOVELTY_VERDICTS: tuple[str, ...] = get_args(NoveltyVerdict)
 
 # gemini_convo.md, "Novelty Auditor Agent": "If prior art exists above
@@ -224,6 +237,12 @@ def _note(
             f"similarity={patent_match.best_similarity:.3f} >= theta={theta} -- candidate "
             "infringement risk (not a legal determination), reject"
         )
+    if verdict == "unsearched":
+        return (
+            f"paper re-query returned 0 results for this idea's method text ({n_patents} "
+            "re-queried patent(s), none >= theta) -- no paper evidence was examined, so this "
+            "is NOT a pass; re-run with a paper search that returns candidates"
+        )
     if verdict == "force_pivot":
         return (
             f"paper {paper_match.best_id!r} similarity={paper_match.best_similarity:.3f} >= "
@@ -281,9 +300,10 @@ def audit_idea(
     query -- the original `Gap.matches` that produced this idea are not
     consulted, per the module docstring's "re-check, not re-read" framing.
     `theta` gates both comparisons; see module docstring for why a patent
-    match rejects and a paper match force-pivots. `llm` is only called (via
-    its one `generate(prompt) -> str` method) when the verdict is not
-    "pass" -- see module docstring.
+    match rejects and a paper match force-pivots, and why an empty paper
+    re-query is "unsearched", not "pass". `llm` is only called (via its one
+    `generate(prompt) -> str` method) on a "reject" or "force_pivot"
+    verdict -- see module docstring.
     """
     candidate_papers = search_papers(idea.method)
     candidate_patents = search_patents(idea.method)
@@ -295,13 +315,15 @@ def audit_idea(
     verdict: NoveltyVerdict
     if patent_match.above_theta:
         verdict = "reject"
+    elif not candidate_papers:
+        verdict = "unsearched"
     elif paper_match.above_theta:
         verdict = "force_pivot"
     else:
         verdict = "pass"
 
     rationale = ""
-    if verdict != "pass" and llm is not None:
+    if verdict in ("reject", "force_pivot") and llm is not None:
         rationale = llm.generate(_rationale_prompt(idea, verdict, paper_match, patent_match))
 
     note = _note(verdict, paper_match, patent_match, len(candidate_papers), len(candidate_patents), warnings, theta)
@@ -398,7 +420,13 @@ def build_novelty_auditor_agent_node(
             claims_field=claims_field,
         )
         summary = f"novelty auditor: {len(audits)} audit(s) from {len(ideas)} idea(s)"
-        return {"audits": audits, "agent_notes": [summary, *notes]}
+        unsearched = [
+            f"unsearched {a.subject_id!r} ({a.gap_key!r}): paper re-query returned 0 results -- "
+            "do not treat as a pass"
+            for a in audits
+            if a.verdict == "unsearched"
+        ]
+        return {"audits": audits, "agent_notes": [summary, *unsearched, *notes]}
 
     return _node
 
@@ -470,6 +498,14 @@ def _self_check() -> None:
 
     audits, notes = audit([idea], search_papers=unrelated_papers, search_patents=conflicting_patents, theta=0.6)
     assert len(audits) == 1 and audits[0].verdict == "reject", (audits, notes)
+
+    def no_papers(query: str) -> list[Record]:
+        return []
+
+    unsearched = audit_idea(idea, search_papers=no_papers, search_patents=unrelated_patents, llm=_StubLLM())
+    assert unsearched.verdict == "unsearched", unsearched
+    assert unsearched.rationale == "", "LLM must not be called on an unsearched verdict"
+    assert "NOT a pass" in unsearched.note, unsearched.note
 
     def failing_search(query: str) -> list[Record]:
         raise RuntimeError("simulated transport failure")

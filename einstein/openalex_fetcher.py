@@ -24,37 +24,38 @@ OpenAlex exposes two ways to do that and they are not equivalent:
 
 - `GET /works?search=<q>` runs the query against full-text search (indexed
   fulltext where available, else title/abstract/other fields) ranked by a
-  relevance score. Live-checked by hand 2026-09-24 against the query
-  "tensor network contraction for transformer attention": 2,515 hits, and
-  the #1 result by relevance_score was "AI-Assisted Pipeline for Dynamic
-  Generation of Trustworthy Health Supplement Content at Scale" -- a
-  supplement-marketing paper with no topical relation to the query at all.
-  High recall, unusable precision for this use case.
-- `GET /works?filter=title_and_abstract.search:<q>` restricts the same
-  ranking to title + abstract text. The identical query against this
-  endpoint returned 7 hits, all transformer/tensor-method papers (e.g.
-  "MMT: Multi-way Multi-modal Transformer for Multimodal Learning"). A
-  second check against "quantum error correction surface code" (a query
-  with much deeper OpenAlex coverage) returned 1,983 hits topped by
-  "Quantum error correction below the surface code threshold" and three
-  more surface-code QEC papers in the top five -- tight and on-topic.
+  relevance score. Terms are NOT all required to match.
+- `GET /works?filter=title_and_abstract.search:<q>` restricts matching to
+  title + abstract, and every term must match.
 
-`search_papers` therefore uses `title_and_abstract.search`, not `search`.
-This is a considered trade against Semantic Scholar's `/paper/search`
-(what `gemini_convo.md` names): Semantic Scholar needs a fourth credential
-this repo does not have configured (see einstein-0.5's notes), and the
-`title_and_abstract.search` filter measured above gives adequate recall
-for a method-text query with zero new credentials. If a future query class
-turns up as poorly on this filter as "tensor network contraction..." did on
-plain `search`, that is grounds to revisit -- Semantic Scholar becomes the
-answer after all, per the bead. See `scripts/openalex_search_recall_check.py`
-to re-run this comparison by hand.
+History, so the next person does not flip this back: einstein-0.5 chose the
+filter, on two SHORT queries checked by hand 2026-09-24 ("tensor network
+contraction for transformer attention": filter 7 on-topic hits vs `search=`
+2,515 hits topped by an unrelated supplement-marketing paper). That check
+never tried the query `audit_idea` actually sends -- `idea.method`, a whole
+method paragraph. Bead einstein-av1 records a live measurement the same day: a 14-word
+query returned 0 results via the filter against 44 via `search=`; 9 words
+gave 3 vs 3,893. Every-term-must-match collapses to zero as the query
+grows, and the auditor turned that `[]` into a "pass" -- a fail-open on
+missing evidence. `search_papers` therefore uses `search=` (einstein-av1).
+
+The precision cost is real but it is the safe side of the trade: an
+off-topic hit is scored by cosine similarity against theta in
+`novelty_auditor` and simply fails to reach it, whereas a missing hit is
+invisible. It is not free, though: only the top `max_results` are
+returned, so if relevance ranking buries the real prior art under
+off-topic hits, a "pass" is still only as good as that ranking. An empty
+result is additionally never a "pass" (see
+`novelty_auditor`'s "unsearched" verdict). See
+`scripts/openalex_search_recall_check.py` to re-run the comparison by hand,
+including on paragraph-length queries.
 """
 
 from __future__ import annotations
 
 import logging
 import os
+import re
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -124,24 +125,29 @@ def _params(mailto: str | None) -> dict[str, str]:
     return {"mailto": email} if email else {}
 
 
-def _filter_value(query: str) -> str:
-    """Escape `query` for use as an OpenAlex `filter=key:<value>` value.
+_QUERY_SYNTAX_RE = re.compile(r"[^\w\s]+")
 
-    OpenAlex's filter DSL splits on a bare `,` to separate multiple
-    filters, applied to the raw parameter value regardless of percent-
-    encoding (`%2C` is rejected as an "unescaped comma" too -- confirmed
-    live, see `search_papers`'s docstring). Wrapping the whole value in
-    double quotes, as OpenAlex's own 400 response suggests, avoids that
-    without needing to know their encoding internals. This does change
-    the match from an OR-of-terms to a stemmed phrase match, which is a
-    real precision/recall tradeoff -- but a query with a comma in it (e.g.
-    "gradient descent, adaptive learning rate") is already closer to a
-    phrase than a bag of words, so that tradeoff lands on the reasonable
-    side. Queries without a comma are left exactly as `search_papers`
-    passes them, matching the unquoted behavior this bead's recall check
-    was run against.
+
+def _search_value(query: str) -> str:
+    """Reduce `query` to a plain lowercase bag of words for `search=`.
+
+    `search_papers` sends a free-text method paragraph, not a hand-written
+    query, so any character OpenAlex's search might read as syntax is
+    neutralized rather than passed through: punctuation (including `,`,
+    `"`, parentheses, `-`) becomes whitespace, and the text is lowercased so
+    a stray "AND"/"OR"/"NOT" in prose cannot act as an uppercase boolean
+    operator. This deliberately does not depend on knowing exactly which of
+    those OpenAlex treats specially -- a punctuation-free, lowercase string
+    of words is the plainest query there is under any reading of their
+    syntax, and relevance ranking does not use punctuation or case anyway.
+
+    The comma case in particular: the old filter path had to quote-wrap a
+    comma (`filter=` splits on a bare `,`, confirmed live in einstein-0.5).
+    Quote-wrapping is wrong here -- in `search=` quotes mean exact phrase,
+    which would reintroduce the zero-recall failure this module moved away
+    from -- so the comma is simply dropped.
     """
-    return f'"{query}"' if "," in query else query
+    return " ".join(_QUERY_SYNTAX_RE.sub(" ", query).lower().split())
 
 
 def fetch_work_by_doi(
@@ -226,17 +232,19 @@ def search_papers(
 
     Matches `einstein.novelty_auditor.SearchFn`
     (`Callable[[str], list[Record]]`) -- pass this directly as
-    `audit_idea(search_papers=search_papers)`. Uses the
-    `title_and_abstract.search` filter, not the plain `search` parameter;
-    see the module docstring for the recall/precision check that decided
-    that.
+    `audit_idea(search_papers=search_papers)`. Uses the relevance-ranked
+    `search=` parameter, not the every-term-must-match
+    `title_and_abstract.search` filter; see the module docstring for the
+    live measurements that decided that.
 
     Raises `OpenAlexFetchError` for any non-200 response (`not_found` is
     always `False` here -- a search has no "not found" case distinct from
     a genuine zero-result search, unlike a single-DOI lookup). A query that
-    matches nothing returns `[]`, not an exception: see `Audit.note`'s
-    "no match found within this search" framing, which depends on `[]`
-    meaning exactly that and nothing else.
+    matches nothing returns `[]`, not an exception -- and
+    `novelty_auditor.audit_idea` turns an empty paper search into an
+    "unsearched" verdict, never a "pass". A query with no word characters
+    left after `_search_value` also returns `[]` without a network call:
+    an empty `search=` would not be a search of anything.
 
     If `store` is given, a cached outcome for this exact `(query,
     max_results)` short-circuits the network call -- same cache-then-fetch
@@ -244,15 +252,14 @@ def search_papers(
     `mailto` is a polite-pool hint, not part of the query's identity, and is
     excluded from the cache key (same reasoning as `fetch_work_by_doi`).
 
-    A `query` containing a comma is quote-wrapped before being sent (see
-    `_filter_value`) -- OpenAlex's filter syntax uses an unescaped `,` to
-    separate multiple filters, and live-checked by hand, its edge proxy
-    rejects even a percent-encoded `%2C` in that position with a 400
-    ("A filter value contains an unescaped comma"). Wrapping in double
-    quotes, which OpenAlex's own error message suggests, is the one thing
-    that was confirmed (by hand) to work.
+    The query is normalized by `_search_value` before being sent
+    (punctuation, commas and quotes included, become whitespace; see
+    there). The cache key keeps the caller's original `query` plus
+    `"param": "search"`, so outcomes cached under the old filter-based
+    search (keyed on `max_results` alone) -- in particular its spurious
+    zero-result negatives -- are never replayed as this search's answer.
     """
-    cache_params = {"max_results": max_results}
+    cache_params = {"max_results": max_results, "param": "search"}
     if store is not None:
         cached = store.lookup_query(source=SOURCE, query=query, params=cache_params, ttl_days=ttl_days)
         if cached.status == "positive":
@@ -264,10 +271,15 @@ def search_papers(
         if cached.status == "negative":
             return []
 
+    search_value = _search_value(query)
+    if not search_value:
+        logger.info("OpenAlex search skipped: no searchable words in query=%r", query)
+        return []
+
     client: _HttpClient = http if http is not None else requests
     params = {
         **_params(mailto),
-        "filter": f"title_and_abstract.search:{_filter_value(query)}",
+        "search": search_value,
         "per-page": max_results,
     }
 
