@@ -404,6 +404,15 @@ class RunTest(_CliTestCase):
 
 
 class MainTest(unittest.TestCase):
+    def setUp(self):
+        # cli.main builds its own parser, so the `--db` default must be
+        # redirected here or these tests create `einstein.db` in cwd.
+        tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(tmpdir.cleanup)
+        db_patch = patch.object(cli, "DEFAULT_DB_PATH", str(Path(tmpdir.name) / "default.db"))
+        db_patch.start()
+        self.addCleanup(db_patch.stop)
+
     def test_text_report_success_exit_zero(self):
         papers = [_paper("p2", "Tensor network attention", "novel tensor contraction for transformer attention")]
         repos = [_repo("o/k8s-tool", "k8s-tool", "command line tool for kubernetes deployment pipelines")]
