@@ -78,6 +78,10 @@ DEPENDENT_ONLY_MATCH_CLAIMS = (
     "2. The widget fastener of claim 1, further used for tensor network contraction for "
     "transformer attention applied to protein folding structure prediction."
 )
+NO_CLAIMS_PATENT = Record(
+    type="patent", id="US004", title="No claims on file", summary="",
+    url="https://patents.google.com/patent/US004", ts="2026-08-12T00:00:00+00:00", raw={},
+)
 DEPENDENT_ONLY_MATCH_PATENT = _patent("US003", DEPENDENT_ONLY_MATCH_CLAIMS, title="Widget with software note")
 
 
@@ -158,6 +162,8 @@ class AuditIdeaVerdictTest(unittest.TestCase):
 
         self.assertEqual(result.verdict, "unsearched")
         self.assertNotEqual(result.verdict, "pass")
+        self.assertEqual(result.unsearched_against, ("paper",))
+        self.assertIn("paper re-query returned 0 results", result.note)
         self.assertEqual(result.queried_paper_ids, ())
         self.assertIn("NOT a pass", result.note)
         self.assertNotIn("not a novelty claim", result.note)
@@ -172,22 +178,50 @@ class AuditIdeaVerdictTest(unittest.TestCase):
         result = audit_idea(IDEA, search_papers=_none, search_patents=_none)
 
         self.assertEqual(result.verdict, "unsearched")
+        self.assertEqual(result.unsearched_against, ("paper", "patent"))
         self.assertEqual(result.queried_paper_ids, ())
         self.assertEqual(result.queried_patent_ids, ())
         self.assertIsNone(result.paper_match.best_id)
         self.assertIsNone(result.patent_match.best_id)
 
     def test_patent_with_no_claim_text_is_skipped_and_warned_not_silently_dropped(self):
-        no_claims_patent = Record(
-            type="patent", id="US004", title="No claims on file", summary="",
-            url="https://patents.google.com/patent/US004", ts="2026-08-12T00:00:00+00:00", raw={},
+        # One patent has claims to compare, one does not: the side was
+        # examined, so a pass is possible, and the skip is still reported.
+        result = audit_idea(
+            IDEA,
+            search_papers=_one(UNRELATED_PAPER),
+            search_patents=lambda query: [UNRELATED_PATENT, NO_CLAIMS_PATENT],
         )
-        result = audit_idea(IDEA, search_papers=_one(UNRELATED_PAPER), search_patents=_one(no_claims_patent))
 
         self.assertEqual(result.verdict, "pass")
+        self.assertEqual(result.unsearched_against, ())
         self.assertEqual(len(result.warnings), 1)
         self.assertIn("US004", result.warnings[0])
         self.assertIn("skipped for lack of usable claim text", result.note)
+
+    def test_every_patent_lacking_claim_text_is_unsearched_not_pass(self):
+        result = audit_idea(IDEA, search_papers=_one(UNRELATED_PAPER), search_patents=_one(NO_CLAIMS_PATENT))
+
+        self.assertEqual(result.verdict, "unsearched")
+        self.assertEqual(result.unsearched_against, ("patent",))
+        self.assertEqual(len(result.warnings), 1)
+        self.assertIn("none of 1 re-queried patent(s) had usable independent-claim text", result.note)
+
+    def test_empty_patent_search_is_unsearched_not_pass(self):
+        llm = StubLLM()
+        result = audit_idea(IDEA, search_papers=_one(UNRELATED_PAPER), search_patents=_none, llm=llm)
+
+        self.assertEqual(result.verdict, "unsearched")
+        self.assertEqual(result.unsearched_against, ("patent",))
+        self.assertIn("patent re-query returned 0 results", result.note)
+        self.assertIn("NOT a pass", result.note)
+        self.assertEqual(llm.prompts, [])
+
+    def test_empty_patent_search_still_force_pivots_on_a_close_paper(self):
+        result = audit_idea(IDEA, search_papers=_one(CLOSE_PAPER), search_patents=_none, theta=0.5)
+
+        self.assertEqual(result.verdict, "force_pivot")
+        self.assertEqual(result.unsearched_against, ("patent",))
 
 
 class AuditIdeaRationaleTest(unittest.TestCase):
@@ -297,6 +331,7 @@ class BuildNoveltyAuditorAgentNodeTest(unittest.TestCase):
         self.assertEqual(result["audits"][0].verdict, "unsearched")
         self.assertEqual(len(result["agent_notes"]), 2)
         self.assertIn(IDEA.subject_id, result["agent_notes"][1])
+        self.assertIn("no paper evidence examined", result["agent_notes"][1])
         self.assertIn("do not treat as a pass", result["agent_notes"][1])
 
     def test_node_on_zero_ideas_returns_empty_audits_and_summary_note(self):
@@ -308,6 +343,24 @@ class BuildNoveltyAuditorAgentNodeTest(unittest.TestCase):
         self.assertEqual(result["audits"], [])
         self.assertEqual(len(result["agent_notes"]), 1)
         self.assertIn("0 audit(s) from 0 idea(s)", result["agent_notes"][0])
+
+
+class AuditInvariantTest(unittest.TestCase):
+    def _audit(self, verdict, unsearched_against):
+        empty = PriorArtMatch(against_type="paper", best_id=None, best_similarity=0.0, theta=0.85)
+        return Audit(
+            gap_key="g", subject_id="s", idea_method="m", idea_problem="p", verdict=verdict,
+            paper_match=empty, patent_match=PriorArtMatch(against_type="patent", best_id=None, best_similarity=0.0, theta=0.85),
+            queried_paper_ids=(), queried_patent_ids=(), unsearched_against=unsearched_against,
+        )
+
+    def test_pass_with_an_unsearched_side_is_rejected(self):
+        with self.assertRaises(AssertionError):
+            self._audit("pass", ("patent",))
+
+    def test_unsearched_without_a_side_is_rejected(self):
+        with self.assertRaises(AssertionError):
+            self._audit("unsearched", ())
 
 
 class PriorArtMatchTest(unittest.TestCase):

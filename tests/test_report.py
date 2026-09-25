@@ -59,6 +59,7 @@ def _audit(gap_key: str = IDEA.gap_key, verdict: str = "pass") -> Audit:
         patent_match=_prior_art_match("patent"),
         queried_paper_ids=("p1",),
         queried_patent_ids=(),
+        unsearched_against=("paper",) if verdict == "unsearched" else (),
         note="no match >= theta=0.85 among 1 re-queried paper(s) and 0 re-queried patent(s)",
     )
 

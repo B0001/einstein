@@ -57,18 +57,26 @@ A "pass" verdict is never phrased as novelty. It means: nothing in the
 freshly re-queried papers/patents scored >= theta. That is "no match found
 within this search, these sources, this threshold" -- see `Audit.note`.
 
-An empty paper re-query is NOT a pass (einstein-av1). With zero candidate
-papers nothing can score >= theta, so "pass" would be vacuous: it would
-certify an absence of prior art that was never looked for. That is exactly
-what happened in practice -- the OpenAlex backend's old every-term-must-
-match filter returned `[]` for paragraph-length `idea.method` queries (see
-`einstein.openalex_fetcher`'s module docstring) -- so an empty paper search
-gets its own verdict, "unsearched", which every downstream consumer
-(feasibility, codegen, report) already skips because they only proceed on
-verdict == "pass". A patent-claim match above theta still wins and
-REJECTs even when the paper search came back empty: that is positive
-evidence, and does not depend on the paper side at all. The LLM is not
-called for "unsearched" -- there is no prior art to narrate.
+A side with no evidence is NOT a pass (einstein-av1). If a side had
+nothing to compare -- zero candidate papers, or zero independent claims
+(no patents came back, or every patent that did lacked usable claim text)
+-- nothing on that side can score >= theta, so "pass" would be vacuous: it
+would certify an absence of prior art that was never looked for. That is
+exactly what happened in practice on the paper side -- the OpenAlex
+backend's old every-term-must-match filter returned `[]` for
+paragraph-length `idea.method` queries (see `einstein.openalex_fetcher`'s
+module docstring). The patent side gets the same rule rather than waiting
+to be caught the same way: `uspto_fetcher` sends the same paragraph as its
+`q`, and how USPTO's search treats a paragraph has not been verified.
+
+Such an audit gets its own verdict, "unsearched", and
+`Audit.unsearched_against` names the side(s) that had no evidence. Every
+downstream consumer (feasibility, codegen, report) already skips it,
+because they only proceed on verdict == "pass". Positive evidence still
+wins: a patent claim >= theta REJECTs and a paper >= theta FORCE_PIVOTs
+even if the other side came back empty, since neither depends on the
+other side. The LLM is not called for "unsearched" -- there is no prior art
+to narrate.
 """
 
 from __future__ import annotations
@@ -87,6 +95,7 @@ from einstein.schema import Record
 from einstein.uspto_fetcher import fetch_patents as _fetch_patents
 
 NoveltyVerdict = Literal["pass", "force_pivot", "reject", "unsearched"]
+PriorArtSide = Literal["paper", "patent"]
 NOVELTY_VERDICTS: tuple[str, ...] = get_args(NoveltyVerdict)
 
 # gemini_convo.md, "Novelty Auditor Agent": "If prior art exists above
@@ -138,6 +147,11 @@ class Audit:
     patent that had no usable independent-claim text (see
     `patent_claims.independent_claims_for_record`) and was therefore
     skipped rather than silently treated as "no claims to conflict with".
+    `unsearched_against` names each side ("paper", "patent") that had
+    nothing to compare against -- see the module docstring. It can be
+    non-empty under "reject"/"force_pivot" too (the other side still found
+    positive evidence), but never under "pass", and "unsearched" always
+    names at least one side.
     """
 
     gap_key: str
@@ -152,9 +166,15 @@ class Audit:
     warnings: tuple[str, ...] = field(default_factory=tuple)
     rationale: str = ""
     note: str = ""
+    unsearched_against: tuple[PriorArtSide, ...] = field(default_factory=tuple)
 
     def __post_init__(self) -> None:
         assert self.verdict in NOVELTY_VERDICTS, self.verdict
+        assert set(self.unsearched_against) <= {"paper", "patent"}, self.unsearched_against
+        if self.verdict == "pass":
+            assert not self.unsearched_against, "a pass cannot have an unsearched side"
+        if self.verdict == "unsearched":
+            assert self.unsearched_against, "an unsearched verdict must name the unsearched side"
 
 
 def _idea_text(idea: Idea) -> str:
@@ -230,6 +250,7 @@ def _note(
     n_patents: int,
     warnings: list[str],
     theta: float,
+    unsearched_against: tuple[PriorArtSide, ...],
 ) -> str:
     if verdict == "reject":
         return (
@@ -238,10 +259,18 @@ def _note(
             "infringement risk (not a legal determination), reject"
         )
     if verdict == "unsearched":
+        gaps = []
+        if "paper" in unsearched_against:
+            gaps.append("paper re-query returned 0 results")
+        if "patent" in unsearched_against:
+            if n_patents == 0:
+                gaps.append("patent re-query returned 0 results")
+            else:
+                gaps.append(f"none of {n_patents} re-queried patent(s) had usable independent-claim text")
         return (
-            f"paper re-query returned 0 results for this idea's method text ({n_patents} "
-            "re-queried patent(s), none >= theta) -- no paper evidence was examined, so this "
-            "is NOT a pass; re-run with a paper search that returns candidates"
+            f"{'; '.join(gaps)} for this idea's method text -- no evidence was examined on "
+            f"that side (nothing else >= theta={theta}), so this is NOT a pass; re-run with a "
+            "search that returns candidates"
         )
     if verdict == "force_pivot":
         return (
@@ -300,8 +329,8 @@ def audit_idea(
     query -- the original `Gap.matches` that produced this idea are not
     consulted, per the module docstring's "re-check, not re-read" framing.
     `theta` gates both comparisons; see module docstring for why a patent
-    match rejects and a paper match force-pivots, and why an empty paper
-    re-query is "unsearched", not "pass". `llm` is only called (via its one
+    match rejects and a paper match force-pivots, and why a side with
+    nothing to compare against is "unsearched", not "pass". `llm` is only called (via its one
     `generate(prompt) -> str` method) on a "reject" or "force_pivot"
     verdict -- see module docstring.
     """
@@ -312,13 +341,17 @@ def audit_idea(
     paper_match = _best_paper_match(idea_text, candidate_papers, theta, embedder)
     patent_match, warnings = _best_patent_claim_match(idea_text, candidate_patents, theta, embedder, claims_field)
 
+    unsearched_against: tuple[PriorArtSide, ...] = tuple(
+        side for side, match in (("paper", paper_match), ("patent", patent_match)) if match.best_id is None
+    )
+
     verdict: NoveltyVerdict
     if patent_match.above_theta:
         verdict = "reject"
-    elif not candidate_papers:
-        verdict = "unsearched"
     elif paper_match.above_theta:
         verdict = "force_pivot"
+    elif unsearched_against:
+        verdict = "unsearched"
     else:
         verdict = "pass"
 
@@ -326,7 +359,16 @@ def audit_idea(
     if verdict in ("reject", "force_pivot") and llm is not None:
         rationale = llm.generate(_rationale_prompt(idea, verdict, paper_match, patent_match))
 
-    note = _note(verdict, paper_match, patent_match, len(candidate_papers), len(candidate_patents), warnings, theta)
+    note = _note(
+        verdict,
+        paper_match,
+        patent_match,
+        len(candidate_papers),
+        len(candidate_patents),
+        warnings,
+        theta,
+        unsearched_against,
+    )
 
     return Audit(
         gap_key=idea.gap_key,
@@ -341,6 +383,7 @@ def audit_idea(
         warnings=tuple(warnings),
         rationale=rationale,
         note=note,
+        unsearched_against=unsearched_against,
     )
 
 
@@ -421,8 +464,8 @@ def build_novelty_auditor_agent_node(
         )
         summary = f"novelty auditor: {len(audits)} audit(s) from {len(ideas)} idea(s)"
         unsearched = [
-            f"unsearched {a.subject_id!r} ({a.gap_key!r}): paper re-query returned 0 results -- "
-            "do not treat as a pass"
+            f"unsearched {a.subject_id!r} ({a.gap_key!r}): no {'/'.join(a.unsearched_against)} "
+            "evidence examined -- do not treat as a pass"
             for a in audits
             if a.verdict == "unsearched"
         ]

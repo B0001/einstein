@@ -75,6 +75,7 @@ def _audit(gap_key: str = IDEA.gap_key, verdict: str = "pass") -> Audit:
         patent_match=_match("patent"),
         queried_paper_ids=(),
         queried_patent_ids=(),
+        unsearched_against=("paper",) if verdict == "unsearched" else (),
     )
 
 
