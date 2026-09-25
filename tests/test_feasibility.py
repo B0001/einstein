@@ -75,6 +75,7 @@ def _audit(gap_key: str = IDEA.gap_key, verdict: str = "pass") -> Audit:
         patent_match=_match("patent"),
         queried_paper_ids=(),
         queried_patent_ids=(),
+        unsearched_against=("paper",) if verdict == "unsearched" else (),
     )
 
 
@@ -121,6 +122,18 @@ class EvaluateFeasibilityTest(unittest.TestCase):
     def test_reject_audit_raises_assertion_error(self):
         with self.assertRaises(AssertionError):
             evaluate_feasibility(IDEA, _audit(verdict="reject"), llm=StubLLM(GO_RESPONSE))
+
+    def test_unsearched_audit_raises_assertion_error(self):
+        with self.assertRaises(AssertionError):
+            evaluate_feasibility(IDEA, _audit(verdict="unsearched"), llm=StubLLM(GO_RESPONSE))
+
+    def test_unsearched_audit_is_skipped_by_batch_with_a_note(self):
+        llm = StubLLM(GO_RESPONSE)
+        assessments, notes = evaluate([IDEA], [_audit(verdict="unsearched")], llm=llm)
+        self.assertEqual(assessments, [])
+        self.assertEqual(llm.prompts, [])
+        self.assertEqual(len(notes), 1)
+        self.assertIn("unsearched", notes[0])
 
     def test_mismatched_gap_key_raises_assertion_error(self):
         mismatched = _audit(gap_key="true_invention_gap:paper:9999999")
