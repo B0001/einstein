@@ -184,8 +184,11 @@ to the nearest 5.3-pt step):
 
 The negative arm alone looks clean — every genuinely unrelated pair scores
 below 0.03 cosine similarity, comfortably separated from threshold, and all
-but one below 0.02 (the exception, WGAN `1701.07875` vs. the campsite finder
-`juftin/camply`, scores 0.021 on the single shared word "like"). The
+but one below 0.02 on most platforms (the exception, WGAN `1701.07875` vs. the
+campsite finder `juftin/camply`, shares one non-stop-word, "like", at a
+cosine similarity right on top of 0.02 — 0.0212 on Linux x86_64, but
+0.018761180918720925 on ARM, where BLAS/sklearn TF-IDF summation order lands
+it on the other side of the threshold; `einstein-1af`). The
 positive arm is where the claim breaks: **3 of the 19 known paper&harr;repo
 links score exactly 0.0 similarity** (`2102.12092`/DALL-E,
 `2010.11929`/ViT, `1701.07875`/WGAN vs. their own repos) — zero shared
@@ -214,18 +217,23 @@ the adjacent arm is not:
 | threshold | flag_rate (cooking) | adjacent_flag_rate | resolution |
 |---|---|---|---|
 | 0.01 | 79% | 32% (6/19) | 1 sample = 5.3 pts |
-| 0.02 | 95% (18/19) | 37% (7/19) | 1 sample = 5.3 pts |
+| 0.02 | 95% (18/19) on Linux x86_64, 100% (19/19) on ARM — `einstein-1af` | 37% (7/19) | 1 sample = 5.3 pts |
 | 0.03 | 100% | 63% (12/19) | 1 sample = 5.3 pts |
 | 0.04 | 100% | 84% (16/19) | 1 sample = 5.3 pts |
 | 0.05 | 100% | 100% (19/19) | 1 sample = 5.3 pts |
 
 At threshold=0.02 specifically — the point `tests/test_gap_benchmark.py`'s
 `test_floor_false_discovery_rate_at_threshold_0_02` asserts directly — the
-cooking arm's flag_rate is 18/19 = 0.947 while the adjacent arm sits at
-7/19 = 0.368, a real collapse, not noise at this corpus's 5.3-pt
-resolution. (Earlier revisions of this section and the einstein-0.1/0.6
-handoffs said 1.00 here; regenerating with the command above on the
-checked-in corpus and locked dependencies gives 18/19.) Per `einstein-0.4`'s own framing ("if flag_rate collapses here
+cooking arm's flag_rate is 18/19 = 0.947 (Linux x86_64) or 19/19 = 1.0 (ARM)
+while the adjacent arm sits at 7/19 = 0.368 on both, a real collapse, not
+noise at this corpus's 5.3-pt resolution. The platform split is a single
+borderline pair (WGAN vs. `juftin/camply`, cosine similarity ~0.02 either
+side depending on floating-point summation order — see above and
+`einstein-1af`), not a difference in what the corpus measures; either value
+supports the same reading below. (Earlier revisions of this section and the
+einstein-0.1/0.6 handoffs said 1.00 here; regenerating with the command above
+on the checked-in corpus and locked dependencies gives 18/19 or 19/19,
+platform-dependent.) Per `einstein-0.4`'s own framing ("if flag_rate collapses here
 while staying 1.00 on the cooking arm, the score is topic distance, not
 opportunity"), **this result supports TOPIC DISTANCE**: shared ML/CS jargon
 between a paper and an unrelated adjacent-subfield repo measurably inflates

@@ -249,31 +249,49 @@ class RealCorpusMeasurementTest(unittest.TestCase):
         # 3 of 19 known paper<->repo links score exactly 0 similarity against
         # their own repo -- zero lexical overlap between abstract and README
         # -- which sets a floor no threshold above 0 can clear. At this same
-        # threshold, the cooking arm is at 18/19 (0.947; the one miss is
-        # pinned by test_only_cooking_arm_miss_at_0_02_is_wgan_vs_camply)
-        # while the adjacent-domain arm is nowhere close (7/19 = 0.368) --
-        # this is the collapse einstein-0.4 was filed to look for.
+        # threshold, the cooking arm is at 18/19 or 19/19 (see below) while
+        # the adjacent-domain arm is nowhere close (7/19 = 0.368) -- this is
+        # the collapse einstein-0.4 was filed to look for.
         #
-        # einstein-0.1/0.6's handoffs recorded flag_rate=1.00 here, but with
-        # this checked-in corpus and the uv.lock-pinned embedder it measures
-        # 18/19, including on the pre-einstein-0.4 commit (so the adjacent
-        # arm joining the shared TF-IDF fit is not the cause). The assertion
-        # follows the measurement, per this class's docstring.
+        # einstein-1af: the cooking arm's flag_rate at 0.02 is
+        # platform-dependent. WGAN (1701.07875) vs. juftin/camply share
+        # exactly one non-stop-word, "like", at a cosine similarity that sits
+        # right on top of 0.02 -- close enough that BLAS/sklearn TF-IDF
+        # summation-order differences between platforms flip which side of
+        # the threshold it lands on: measured 0.0212 (18/19, a miss) on
+        # Linux x86_64 (b68bdce) and 0.018761180918720925 (19/19, flagged) on
+        # ARM -- both macOS arm64 and this repo's aarch64 Linux dev container
+        # agree on that value. See
+        # test_wgan_vs_camply_is_the_closest_negative_pair_to_threshold below,
+        # which pins the score itself with a tolerance band instead of
+        # picking a side. flag_rate is asserted as one of the two measured
+        # values rather than pinned exactly, for the same reason.
         reports = sweep(self.positive, self.negative, self.adjacent, thresholds=[0.02], margins=[0.0])
         report = reports[0]
         self.assertAlmostEqual(report.false_discovery_rate, 3 / 19, places=4)
-        self.assertAlmostEqual(report.flag_rate, 18 / 19, places=4)
+        self.assertTrue(
+            any(abs(report.flag_rate - expected) < 1e-9 for expected in (18 / 19, 19 / 19)),
+            f"flag_rate {report.flag_rate!r} is neither the Linux x86_64 (18/19) nor "
+            "ARM (19/19) measured value -- see einstein-1af",
+        )
         self.assertAlmostEqual(report.adjacent_flag_rate, 7 / 19, places=4)
 
-    def test_only_cooking_arm_miss_at_0_02_is_wgan_vs_camply(self):
+    def test_wgan_vs_camply_is_the_closest_negative_pair_to_threshold(self):
         # WGAN (1701.07875) vs. juftin/camply (a campsite finder) share
-        # exactly one non-stop-word, "like", worth 0.0212 cosine -- just over
-        # 0.02. Every other cooking-arm pair is below 0.02, and all 19 are
-        # below 0.03, which is where the cooking arm actually saturates.
+        # exactly one non-stop-word, "like" -- the highest-scoring cooking-arm
+        # pair, and close enough to the 0.02 threshold that BLAS/sklearn
+        # TF-IDF summation-order differences between platforms move it across
+        # that line (see test_floor_false_discovery_rate_at_threshold_0_02
+        # above and einstein-1af). Pin the score with a tolerance band wide
+        # enough to cover both measured platform values -- 0.0212 on Linux
+        # x86_64, 0.018761180918720925 on ARM -- instead of pinning which
+        # side of 0.02 it falls on.
         embedder = _fit_shared_embedder(self.positive, self.negative, None, self.adjacent)
         scores = score_pairs(self.negative, embedder)
-        at_or_above = [(p.paper.id, p.repo.id) for p, s in zip(self.negative, scores) if s >= 0.02]
-        self.assertEqual(at_or_above, [("1701.07875v3", "juftin/camply")])
+        by_pair = {(p.paper.id, p.repo.id): s for p, s in zip(self.negative, scores)}
+        camply_score = by_pair[("1701.07875v3", "juftin/camply")]
+        self.assertAlmostEqual(camply_score, 0.02, delta=0.003)
+        self.assertEqual(camply_score, max(scores))
         self.assertLess(max(scores), 0.03)
 
     def test_adjacent_arm_reaches_saturation_at_shipped_default_threshold(self):
