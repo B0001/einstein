@@ -1,12 +1,40 @@
 {
-  "_note": "Structurally faithful trimmed shape of a USPTO Open Data Portal patent-search 200 response, used by tests/test_uspto_fetcher.py's caching tests.",
-  "count": 1,
-  "patentData": [
+  "_note": "Trimmed to the fields einstein/uspto_fetcher.py actually reads. The granted-patent entry is a trimmed real response for US12735810 (fetched live against api.uspto.gov/api/v1/patent/applications/search, einstein-tix). The pending-application entry is a trimmed real response for application 19589991 (IQM Finland OY, fetched live this session, einstein-zfp) -- it genuinely has no filingDate key at all, only effectiveFilingDate, which is exactly the shape that used to fall back to the hardcoded 1970-01-01 placeholder.",
+  "count": 2,
+  "patentFileWrapperDataBag": [
     {
-      "patentNumber": "11234567",
-      "patentTitle": "System and Method for Quantum Error Correction",
-      "abstractText": "A system for correcting errors in a quantum processor.",
-      "grantDate": "2023-05-16"
+      "grantDocumentMetaData": {
+        "productIdentifier": "PTGRXML",
+        "zipFileName": "ipg260915.zip",
+        "fileCreateDateTime": "2026-09-15T08:09:36",
+        "xmlFileName": "19658124_12735810.xml",
+        "fileLocationURI": "https://api.uspto.gov/api/v1/datasets/products/files/PTGRXML-SPLT/2026/ipg260915/19658124_12735810.xml"
+      },
+      "applicationMetaData": {
+        "applicationStatusCode": 150,
+        "applicationTypeCode": "UTL",
+        "applicationTypeLabelName": "Utility",
+        "applicationStatusDescriptionText": "Patented Case",
+        "filingDate": "2026-04-24",
+        "patentNumber": "12735810",
+        "grantDate": "2026-09-15",
+        "inventionTitle": "SYSTEMS AND METHODS FOR TRANSFER OF REAGENTS BETWEEN DROPLETS",
+        "firstApplicantName": "10x Genomics, Inc."
+      },
+      "applicationNumberText": "19658124"
+    },
+    {
+      "applicationMetaData": {
+        "applicationStatusCode": 19,
+        "applicationTypeCode": "UTL",
+        "applicationTypeLabelName": "Utility",
+        "applicationStatusDescriptionText": "Application Undergoing Preexam Processing",
+        "effectiveFilingDate": "2026-05-22",
+        "inventionTitle": "METHOD FOR CONSTRUCTING A QUANTUM ERROR CORRECTION CODE, A QUANTUM PROCESSING DEVICE FOR IMPLEMENTING A QUANTUM ERROR CORRECTION CODE, A QUANTUM ERROR CORRECTION CODE AND A METHOD FOR IMPLEMENTING QUANTUM INFORMATION USING THE QUANTUM ERROR CORRECTION CODE",
+        "firstApplicantName": "IQM FINLAND OY"
+      },
+      "applicationNumberText": "19589991"
     }
-  ]
+  ],
+  "requestIdentifier": "trimmed-fixture-not-a-real-request-id"
 }

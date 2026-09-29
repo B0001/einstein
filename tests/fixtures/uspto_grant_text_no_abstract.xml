@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE us-patent-grant SYSTEM "us-patent-grant-v47-2022-02-17.dtd" [ ]>
+<us-patent-grant lang="EN" dtd-version="v4.7 2022-02-17" file="USD1149092-20260922.XML" status="PRODUCTION" id="us-patent-grant" country="US" date-produced="20260908" date-publ="20260922">
+<us-bibliographic-data-grant>
+<publication-reference>
+<document-id>
+<country>US</country>
+<doc-number>D1149092</doc-number>
+<kind>S1</kind>
+<date>20260922</date>
+</document-id>
+</publication-reference>
+<application-reference appl-type="design">
+<document-id>
+<country>US</country>
+<doc-number>30063453</doc-number>
+<date>20260526</date>
+</document-id>
+</application-reference>
+</us-bibliographic-data-grant>
+<description id="description">
+<p id="p-0001" num="0001">Trimmed for this test fixture. A design patent's description is a brief figure-description list, not prose, and is not read by einstein.uspto_grant_text.</p>
+</description>
+<claims id="claims">
+<claim id="CLM-00001" num="00001">
+<claim-text><b>1</b>. The ornamental design for a massager, as shown and described.</claim-text>
+</claim>
+</claims>
+</us-patent-grant>

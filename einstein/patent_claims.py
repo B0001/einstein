@@ -21,14 +21,16 @@ number ("The system of claim 1, wherein...", "... any of claims 1-3 ...",
 
 What this module deliberately does NOT do: fetch claim text over the
 network. `independent_claims_for_record` reads it out of `Record.raw` under
-one of a few plausible field names -- the exact field the USPTO Open Data
-Portal search API uses for full claim text was not confirmed against live
-docs (api.uspto.gov returned 403 without authenticated access from this
-sandbox, and the existing `einstein/uspto_fetcher.py` search response fixture
-in tests/test_uspto_fetcher.py has no claims field at all). If the real field
-name turns out to differ, pass `claims_field=` or `claims_text=` explicitly;
-this function fails loudly rather than silently falling back to the abstract
-when no claim text is found under any of them.
+one of a few plausible field names. `claimsText`, the first of those, is
+confirmed live (einstein-tix): `einstein.uspto_fetcher`'s search API has no
+claims field at all, but `einstein.uspto_grant_text.record_with_grant_text`
+populates `raw["claimsText"]` from a granted patent's Patent Grant
+Full-Text XML, flattened into exactly the "N. text" numbered-paragraph shape
+`parse_claims` below expects -- verified end-to-end against real USPTO grant
+XML with no changes needed here. If a Record's claim text lives somewhere
+else, pass `claims_field=` or `claims_text=` explicitly; this function fails
+loudly rather than silently falling back to the abstract when no claim text
+is found under any of them.
 """
 
 from __future__ import annotations

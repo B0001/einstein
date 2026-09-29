@@ -1,0 +1,43 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE us-patent-grant SYSTEM "us-patent-grant-v47-2022-02-17.dtd" [ ]>
+<us-patent-grant lang="EN" dtd-version="v4.7 2022-02-17" file="US12735810-20260915.XML" status="PRODUCTION" id="us-patent-grant" country="US" date-produced="20260901" date-publ="20260915">
+<us-bibliographic-data-grant>
+<publication-reference>
+<document-id>
+<country>US</country>
+<doc-number>12735810</doc-number>
+<kind>B2</kind>
+<date>20260915</date>
+</document-id>
+</publication-reference>
+<application-reference appl-type="utility">
+<document-id>
+<country>US</country>
+<doc-number>19658124</doc-number>
+<date>20260424</date>
+</document-id>
+</application-reference>
+</us-bibliographic-data-grant>
+<abstract id="abstract">
+<p id="p-0001" num="0000">The disclosure provides systems and methods for droplet processing. For example, a method can include providing a first droplet and a second droplet. In some cases, the first droplet may have a first concentration of a reagent and the second droplet may have a second concentration of the reagent. The second droplet may comprise a bead or a biological particle. The method can also include subjecting the first droplet and the second droplet to conditions sufficient to transfer the reagent from the first droplet to the second droplet, thereby decreasing the first concentration in the first droplet and increasing the second concentration in the second droplet.</p>
+</abstract>
+<description id="description">
+<p id="p-0001" num="0001">Trimmed for this test fixture -- einstein.uspto_grant_text deliberately does not read &lt;description&gt;, see its module docstring.</p>
+</description>
+<claims id="claims">
+<claim id="CLM-00001" num="00001">
+<claim-text><b>1</b>. A method, comprising:
+<claim-text>generating a first emulsion using: (i) a first aqueous fluid comprising a reagent, and (ii) a partitioning fluid comprising a fluorinated oil and a fluorosurfactant comprising a perfluoropolyether (PFPE), wherein the first emulsion comprises a first plurality of droplets dispersed in the partitioning fluid, wherein a first droplet of the first plurality of droplets comprises the reagent at a first concentration;</claim-text>
+<claim-text>generating a second emulsion using: (i) a second aqueous fluid comprising a plurality of cells and a plurality of beads, wherein a bead of the plurality of beads comprises a plurality of nucleic acid barcode molecules, and (ii) the partitioning fluid, wherein the second emulsion comprises a second plurality of droplets dispersed in the partitioning fluid, wherein a second droplet of the second plurality of droplets comprises a cell of the plurality of cells and the bead of the plurality of beads, and wherein the reagent is absent from the second droplet or present in the second droplet at a second concentration that is lower than the first concentration;</claim-text>
+<claim-text>contacting the first emulsion with the second emulsion; and</claim-text>
+<claim-text>transferring the reagent from the first droplet to the second droplet via an aggregate of surfactant molecules comprising the reagent.</claim-text>
+</claim-text>
+</claim>
+<claim id="CLM-00002" num="00002">
+<claim-text><b>2</b>. The method of <claim-ref idref="CLM-00001">claim 1</claim-ref>, wherein the first aqueous fluid further comprises an ammonium salt and wherein the reagent is a surfactant.</claim-text>
+</claim>
+<claim id="CLM-00003" num="00003">
+<claim-text><b>3</b>. The method of <claim-ref idref="CLM-00002">claim 2</claim-ref>, wherein the surfactant is SDS.</claim-text>
+</claim>
+</claims>
+</us-patent-grant>

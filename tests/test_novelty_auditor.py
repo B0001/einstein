@@ -3,6 +3,7 @@ against re-queried papers and patent claims, no network and no real LLM
 (see module docstring in einstein/novelty_auditor.py).
 """
 
+import inspect
 import unittest
 
 from einstein.graph import AgentState, initial_state
@@ -15,6 +16,7 @@ from einstein.novelty_auditor import (
     build_novelty_auditor_agent_node,
 )
 from einstein.schema import Record
+from einstein.uspto_grant_text import GrantText, GrantTextError
 
 IDEA = Idea(
     gap_key="true_invention_gap:paper:2508.00001",
@@ -82,6 +84,32 @@ NO_CLAIMS_PATENT = Record(
     url="https://patents.google.com/patent/US004", ts="2026-08-12T00:00:00+00:00", raw={},
 )
 DEPENDENT_ONLY_MATCH_PATENT = _patent("US003", DEPENDENT_ONLY_MATCH_CLAIMS, title="Widget with software note")
+
+# Shaped exactly like what einstein.uspto_fetcher.fetch_patents actually
+# returns for a granted patent (einstein-tix): raw carries
+# applicationMetaData and grantDocumentMetaData.fileLocationURI, summary is
+# title-only, and raw has no claimsText field at all -- that field only
+# exists once something enriches the Record via uspto_grant_text, which
+# fetch_patents itself never does (see einstein-9it). Used to prove
+# audit_idea's lazy enrichment path populates claimsText from a live-shaped
+# Record, not just a hand-built test fixture that already has it.
+LIVE_SHAPED_PATENT = Record(
+    type="patent",
+    id="12735810",
+    title="Droplet microfluidics reagent transfer",
+    summary="Droplet microfluidics reagent transfer",
+    url="https://patents.google.com/patent/US12735810/en",
+    ts="2025-11-04",
+    raw={
+        "applicationMetaData": {
+            "inventionTitle": "Droplet microfluidics reagent transfer",
+            "patentNumber": "12735810",
+        },
+        "grantDocumentMetaData": {
+            "fileLocationURI": "https://api.uspto.gov/api/v1/patent/applications/12735810/grant/download"
+        },
+    },
+)
 
 
 def _one(record: Record):
@@ -412,6 +440,104 @@ class SearchPapersIntegrationTest(unittest.TestCase):
 
         self.assertEqual(result.verdict, "pass")
         self.assertEqual(result.queried_paper_ids, ("W1",))
+
+
+class GrantTextEnrichmentTest(unittest.TestCase):
+    """einstein-9it: a live-shaped patent Record (no claimsText, per
+    uspto_fetcher's title-only Records) reaching claim comparison gets
+    lazily enriched via an injected `grant_text_fetcher`, exactly as the
+    default (real `uspto_grant_text.fetch_grant_text`) would against the
+    live API -- no network in this suite (see module docstring's rule).
+    """
+
+    def test_live_shaped_patent_is_enriched_and_its_claim_text_is_compared(self):
+        # No claimsText anywhere in LIVE_SHAPED_PATENT.raw -- if enrichment
+        # didn't run, independent_claims_for_record would raise
+        # ClaimsNotFoundError and this would come back "unsearched", not
+        # "reject". Getting "reject", with the specific claim number the
+        # fetcher's text carries, is the only way this test passes if
+        # raw["claimsText"] genuinely got populated and used.
+        self.assertNotIn("claimsText", LIVE_SHAPED_PATENT.raw)
+        calls = []
+
+        def fetcher(record):
+            calls.append(record.id)
+            return GrantText(abstract="an abstract", claims_text=CONFLICTING_PATENT_CLAIMS)
+
+        result = audit_idea(
+            IDEA,
+            search_papers=_one(UNRELATED_PAPER),
+            search_patents=_one(LIVE_SHAPED_PATENT),
+            theta=0.6,
+            grant_text_fetcher=fetcher,
+        )
+
+        self.assertEqual(result.verdict, "reject")
+        self.assertEqual(result.patent_match.best_id, "12735810")
+        self.assertEqual(result.patent_match.claim_number, 1)
+        self.assertEqual(calls, ["12735810"])
+
+    def test_grant_text_fetcher_is_not_called_for_a_patent_that_already_has_claims_text(self):
+        # Quota-consciousness (module docstring): a patent that already
+        # carries claim text (test fixture, or enriched upstream) must not
+        # trigger another fetch. Asserting via a fetcher that fails the test
+        # if invoked at all -- stronger than just checking the outcome.
+        def must_not_be_called(record):
+            self.fail(f"grant_text_fetcher must not be called for {record.id!r}, it already has claims text")
+
+        result = audit_idea(
+            IDEA,
+            search_papers=_one(UNRELATED_PAPER),
+            search_patents=_one(CONFLICTING_PATENT),
+            theta=0.6,
+            grant_text_fetcher=must_not_be_called,
+        )
+
+        self.assertEqual(result.verdict, "reject")
+
+    def test_grant_text_fetch_failure_is_warned_not_silently_treated_as_no_conflict(self):
+        def failing_fetcher(record):
+            raise GrantTextError(f"grant text fetch failed: 404 Not Found for {record.id!r}")
+
+        result = audit_idea(
+            IDEA,
+            search_papers=_one(UNRELATED_PAPER),
+            search_patents=_one(LIVE_SHAPED_PATENT),
+            grant_text_fetcher=failing_fetcher,
+        )
+
+        self.assertEqual(result.verdict, "unsearched")
+        self.assertEqual(result.unsearched_against, ("patent",))
+        self.assertEqual(len(result.warnings), 1)
+        self.assertIn("12735810", result.warnings[0])
+        self.assertIn("grant-text enrichment skipped", result.warnings[0])
+
+    def test_grant_text_fetcher_none_disables_enrichment(self):
+        # Explicit opt-out (module docstring): with no fetcher at all, a
+        # live-shaped patent with no claimsText behaves exactly like the
+        # pre-einstein-9it NO_CLAIMS_PATENT case -- skipped, not enriched.
+        result = audit_idea(
+            IDEA,
+            search_papers=_one(UNRELATED_PAPER),
+            search_patents=_one(LIVE_SHAPED_PATENT),
+            grant_text_fetcher=None,
+        )
+
+        self.assertEqual(result.verdict, "unsearched")
+        self.assertEqual(result.unsearched_against, ("patent",))
+        self.assertIn("12735810", result.warnings[0])
+
+    def test_default_grant_text_fetcher_is_the_real_uspto_module_function(self):
+        # The live pipeline (audit_idea/audit/build_novelty_auditor_agent_node
+        # with no grant_text_fetcher= override) must wire the real fetcher,
+        # not silently no-op -- that is the entire point of einstein-9it.
+        # Checked by parameter identity, not by exercising it, so this stays
+        # network-free regardless of what the real fetcher would do.
+        from einstein.uspto_grant_text import fetch_grant_text as real_fetch_grant_text
+
+        for fn in (audit_idea, audit, build_novelty_auditor_agent_node):
+            default = inspect.signature(fn).parameters["grant_text_fetcher"].default
+            self.assertIs(default, real_fetch_grant_text, fn.__name__)
 
 
 if __name__ == "__main__":

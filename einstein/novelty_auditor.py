@@ -77,6 +77,27 @@ wins: a patent claim >= theta REJECTs and a paper >= theta FORCE_PIVOTs
 even if the other side came back empty, since neither depends on the
 other side. The LLM is not called for "unsearched" -- there is no prior art
 to narrate.
+
+Grant-text enrichment (einstein-9it). `uspto_fetcher.fetch_patents`'s Records
+are title-only -- no claims field exists in that search API (see its module
+docstring). Left as-is, every real patent Record reaching `_candidate_claims`
+below would raise `ClaimsNotFoundError` and get skipped, so the claim-level
+comparison this module exists to do would never run against real USPTO data.
+`einstein.uspto_grant_text.fetch_grant_text` can fetch the real claims text,
+but it costs a network round-trip against a key rate-limited to ~20
+downloads/year *per specific file* (`uspto_grant_text`'s module docstring) --
+spending it on every candidate patent a plain search returns, most of which
+never reach claim comparison (e.g. `einstein.graph`'s `ingest` node only ever
+reads title/summary for gap detection, never claims), would burn that quota
+on patents nothing downstream needs. So enrichment here is lazy, not eager:
+`_candidate_claims` only calls `grant_text_fetcher` for a patent that (a) is
+actually a candidate for this idea's claim comparison and (b) has no claim
+text already (a test fixture, or a Record enriched upstream, costs nothing
+extra). `grant_text_fetcher` defaults to the real
+`uspto_grant_text.fetch_grant_text`; a patent it cannot enrich (no
+`grantDocumentMetaData.fileLocationURI` -- e.g. a still-pending application --
+or a failed fetch) is treated exactly like any other patent with no claim
+text: a warning, not a fabricated "no conflicting claims".
 """
 
 from __future__ import annotations
@@ -93,6 +114,9 @@ from einstein.ideator import Idea, LLMClient
 from einstein.patent_claims import ClaimsNotFoundError, independent_claims_for_record
 from einstein.schema import Record
 from einstein.uspto_fetcher import fetch_patents as _fetch_patents
+from einstein.uspto_grant_text import GrantText, GrantTextError
+from einstein.uspto_grant_text import fetch_grant_text as _fetch_grant_text
+from einstein.uspto_grant_text import record_with_grant_text
 
 NoveltyVerdict = Literal["pass", "force_pivot", "reject", "unsearched"]
 PriorArtSide = Literal["paper", "patent"]
@@ -106,6 +130,7 @@ NOVELTY_VERDICTS: tuple[str, ...] = get_args(NoveltyVerdict)
 DEFAULT_THETA = 0.85
 
 SearchFn = Callable[[str], list[Record]]
+GrantTextFetchFn = Callable[[Record], GrantText]
 
 
 @dataclass(frozen=True, slots=True)
@@ -197,8 +222,28 @@ def _best_paper_match(idea_text: str, papers: list[Record], theta: float, embedd
     )
 
 
+def _enrich_with_grant_text(patent: Record, grant_text_fetcher: GrantTextFetchFn) -> tuple[Record, str | None]:
+    """Lazily fetch real grant claims text for one patent that has none yet.
+
+    Only called from `_candidate_claims` after a plain `independent_claims_
+    for_record` lookup already failed -- see module docstring on why this is
+    lazy, not eager. Returns `(patent, None)` enriched on success, or the
+    original `patent` unchanged with a warning string when `grant_text_
+    fetcher` cannot enrich it (a still-pending application has no grant
+    document at all; a fetch can also just fail) -- that is a fact about
+    this patent, not a bug, so `_candidate_claims` folds it into the same
+    "skipped, not silently treated as no conflict" warning path as any other
+    patent lacking claim text.
+    """
+    try:
+        grant_text = grant_text_fetcher(patent)
+    except GrantTextError as exc:
+        return patent, f"patent {patent.id!r}: grant-text enrichment skipped: {exc}"
+    return record_with_grant_text(patent, grant_text), None
+
+
 def _candidate_claims(
-    patents: list[Record], claims_field: str | None
+    patents: list[Record], claims_field: str | None, grant_text_fetcher: GrantTextFetchFn | None
 ) -> tuple[list[tuple[str, int, str]], list[str]]:
     """Independent claims across every candidate patent, plus a warning for
     any patent with no usable claim text.
@@ -207,7 +252,10 @@ def _candidate_claims(
     for is skipped, not treated as "has no conflicting claims" -- those are
     different facts (see `patent_claims.py`'s own "does NOT fall back to
     the abstract" contract), so the distinction is preserved in `warnings`
-    rather than collapsed away.
+    rather than collapsed away -- unless `grant_text_fetcher` is given, in
+    which case that patent gets exactly one lazy enrichment attempt first
+    (see module docstring and `_enrich_with_grant_text`) before being
+    counted as unusable.
     """
     claims: list[tuple[str, int, str]] = []
     warnings: list[str] = []
@@ -215,16 +263,32 @@ def _candidate_claims(
         try:
             independent = independent_claims_for_record(patent, claims_field=claims_field)
         except ClaimsNotFoundError as exc:
-            warnings.append(f"patent {patent.id!r}: {exc}")
-            continue
+            if grant_text_fetcher is None:
+                warnings.append(f"patent {patent.id!r}: {exc}")
+                continue
+            enriched, warning = _enrich_with_grant_text(patent, grant_text_fetcher)
+            if warning:
+                warnings.append(warning)
+                continue
+            try:
+                independent = independent_claims_for_record(enriched, claims_field=claims_field)
+            except ClaimsNotFoundError as exc2:
+                warnings.append(f"patent {patent.id!r}: {exc2}")
+                continue
+            patent = enriched
         claims.extend((patent.id, claim.number, claim.text) for claim in independent)
     return claims, warnings
 
 
 def _best_patent_claim_match(
-    idea_text: str, patents: list[Record], theta: float, embedder: Embedder | None, claims_field: str | None
+    idea_text: str,
+    patents: list[Record],
+    theta: float,
+    embedder: Embedder | None,
+    claims_field: str | None,
+    grant_text_fetcher: GrantTextFetchFn | None,
 ) -> tuple[PriorArtMatch, list[str]]:
-    claims, warnings = _candidate_claims(patents, claims_field)
+    claims, warnings = _candidate_claims(patents, claims_field, grant_text_fetcher)
     if not claims:
         return PriorArtMatch(against_type="patent", best_id=None, best_similarity=0.0, theta=theta), warnings
 
@@ -322,6 +386,7 @@ def audit_idea(
     embedder: Embedder | None = None,
     llm: LLMClient | None = None,
     claims_field: str | None = None,
+    grant_text_fetcher: GrantTextFetchFn | None = _fetch_grant_text,
 ) -> Audit:
     """Adversarially re-check a single `Idea`.
 
@@ -333,13 +398,24 @@ def audit_idea(
     nothing to compare against is "unsearched", not "pass". `llm` is only called (via its one
     `generate(prompt) -> str` method) on a "reject" or "force_pivot"
     verdict -- see module docstring.
+
+    `grant_text_fetcher` defaults to the real `uspto_grant_text.fetch_grant_
+    text` -- it is only ever called for a candidate patent that reaches claim
+    comparison and has no claim text yet (see "Grant-text enrichment" in the
+    module docstring), so a `search_patents` that already returns
+    fully-enriched or synthetic patent Records (as every test in this repo
+    does) never triggers it. Pass `None` to disable enrichment entirely and
+    fall back to the pre-einstein-9it behavior (every un-enriched patent
+    Record is skipped with a warning).
     """
     candidate_papers = search_papers(idea.method)
     candidate_patents = search_patents(idea.method)
     idea_text = _idea_text(idea)
 
     paper_match = _best_paper_match(idea_text, candidate_papers, theta, embedder)
-    patent_match, warnings = _best_patent_claim_match(idea_text, candidate_patents, theta, embedder, claims_field)
+    patent_match, warnings = _best_patent_claim_match(
+        idea_text, candidate_patents, theta, embedder, claims_field, grant_text_fetcher
+    )
 
     unsearched_against: tuple[PriorArtSide, ...] = tuple(
         side for side, match in (("paper", paper_match), ("patent", patent_match)) if match.best_id is None
@@ -396,6 +472,7 @@ def audit(
     embedder: Embedder | None = None,
     llm: LLMClient | None = None,
     claims_field: str | None = None,
+    grant_text_fetcher: GrantTextFetchFn | None = _fetch_grant_text,
 ) -> tuple[list[Audit], list[str]]:
     """Audit every `Idea` in `ideas`. Returns `(audits, notes)`.
 
@@ -420,6 +497,7 @@ def audit(
                     embedder=embedder,
                     llm=llm,
                     claims_field=claims_field,
+                    grant_text_fetcher=grant_text_fetcher,
                 )
             )
         except Exception as exc:  # noqa: BLE001 -- see docstring above
@@ -438,6 +516,7 @@ def build_novelty_auditor_agent_node(
     embedder: Embedder | None = None,
     llm: LLMClient | None = None,
     claims_field: str | None = None,
+    grant_text_fetcher: GrantTextFetchFn | None = _fetch_grant_text,
 ):
     """Factory for `einstein.graph.build_graph`'s `agent_node=` slot.
 
@@ -461,6 +540,7 @@ def build_novelty_auditor_agent_node(
             embedder=embedder,
             llm=llm,
             claims_field=claims_field,
+            grant_text_fetcher=grant_text_fetcher,
         )
         summary = f"novelty auditor: {len(audits)} audit(s) from {len(ideas)} idea(s)"
         unsearched = [
