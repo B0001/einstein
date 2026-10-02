@@ -4,9 +4,15 @@ name: nightly gap-detection run
 # job, not a DAG engine (see the bead: "a DAG engine for a linear pipeline is
 # 3am-page material"). This runs the CLI once for one domain and uploads
 # whatever it reports -- including a failed/skipped-source report -- as a
-# build artifact. It does not retry, does not fan out to multiple domains,
-# and does not push results anywhere; wiring a destination (issue, PR,
-# dashboard) is separate scope, not assumed here.
+# build artifact. It does not fan out to multiple domains and does not push
+# results anywhere; wiring a destination (issue, PR, dashboard) is separate
+# scope, not assumed here.
+#
+# One retry, and only for a live fetch failure: arXiv's export API throttles
+# shared GitHub runner IPs (HTTP 429/406 in roughly a third of nightly runs),
+# and the `arxiv` client's own 3 retries at a fixed 3s delay are far shorter
+# than that throttle. The fetchers themselves stay retry-free
+# (arxiv_fetcher.py); the wait lives here, where a 5-minute sleep is cheap.
 #
 # `domain` and `repo-threshold`/`patent-threshold` are workflow_dispatch
 # inputs so a run can be triggered by hand with different values; the
@@ -65,11 +71,27 @@ jobs:
           if [ -z "${USPTO_API_KEY:-}" ]; then
             skip_patents="--skip-patents"
           fi
-          uv run einstein "$RUN_DOMAIN" \
-            --repo-threshold "$RUN_REPO_THRESHOLD" \
-            --patent-threshold "$RUN_PATENT_THRESHOLD" \
-            $skip_patents \
-            --json --output report.json
+          run_einstein() {
+            uv run einstein "$RUN_DOMAIN" \
+              --repo-threshold "$RUN_REPO_THRESHOLD" \
+              --patent-threshold "$RUN_PATENT_THRESHOLD" \
+              $skip_patents \
+              --json --output report.json 2>stderr.log
+            rc=$?
+            cat stderr.log >&2
+            return "$rc"
+          }
+          status=0
+          run_einstein || status=$?
+          # Exit 1 with this line is the CLI's live-fetch-failure path
+          # (cli.py main); argparse errors (exit 2) and crashes don't retry.
+          if [ "$status" -eq 1 ] && grep -q "^no report produced:" stderr.log; then
+            echo "::warning::live fetch failed; retrying once in 300s"
+            sleep 300
+            status=0
+            run_einstein || status=$?
+          fi
+          [ "$status" -eq 0 ] || exit "$status"
           cat report.json
 
       - name: Upload report
