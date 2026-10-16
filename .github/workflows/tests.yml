@@ -1,6 +1,6 @@
 name: tests
 
-# einstein-ac4: the suite is offline (no network) and runs in under a second,
+# einstein-ac4: the suite is offline (no network) and runs in ~10s,
 # so it runs on every push and PR, separately from the live nightly job.
 
 on:

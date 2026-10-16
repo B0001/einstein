@@ -67,7 +67,10 @@ SandboxStatus = Literal["validated", "repaired", "failed"]
 SANDBOX_STATUSES: tuple[str, ...] = get_args(SandboxStatus)
 
 REPORT_NOTE = (
-    "Each proposal below is a candidate that survived an adversarial novelty audit "
+    "Each proposal below is a candidate whose novelty audit found no prior art above theta "
+    "(calibrated, paper side only, to catch ~95% of near-verbatim restatements when the "
+    "matching paper was retrieved; paraphrased or unretrieved prior art can still slip "
+    "through) "
     "and was actually run in a sandboxed subprocess against a pinned library "
     "version -- see each proposal's novelty_note/sandbox_note for exactly what was "
     "searched and run, and what was not. 'validated'/'repaired' means the code "

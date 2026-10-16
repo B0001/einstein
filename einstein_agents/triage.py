@@ -14,10 +14,10 @@ is spent.
    phrasing is brittle) and the union is ranked against the question.
 
 The output is an evidence pack for a reader, never a novelty verdict. The
-TF-IDF + theta gate in `novelty_auditor` effectively always passes a
-one-sentence question (short text rarely reaches cosine 0.85 against an
-abstract), so a mechanical "pass" is not evidence of novelty; the ranked
-nearest papers are. A failed search is `search_failed` and a search that
+TF-IDF + theta gate in `novelty_auditor` is calibrated only on near-verbatim
+restatements (`einstein_agents.novelty_calibration`), so a mechanical "pass"
+on a paraphrased question is weak evidence of novelty; the ranked nearest
+papers are the evidence. A failed search is `search_failed` and a search that
 returns nothing at all is `search_empty`, never `read`: missing evidence must
 not look like an empty literature. (OpenAlex's `title_and_abstract.search`
 filter, which `openalex_fetcher.search_papers` uses, ANDs every term, so a

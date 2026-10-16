@@ -41,8 +41,9 @@ missing evidence. `search_papers` therefore uses `search=` (einstein-av1).
 
 The precision cost is real but it is the safe side of the trade: an
 off-topic hit is scored by cosine similarity against theta in
-`novelty_auditor` and simply fails to reach it, whereas a missing hit is
-invisible. It is not free, though: only the top `max_results` are
+`einstein_agents.novelty_auditor`. A truly off-topic hit fails to reach it,
+though a same-subfield hit can (calibrated theta=0.25, einstein-wvc) and
+force a pivot. A missing hit, by contrast, is invisible. It is not free, though: only the top `max_results` are
 returned, so if relevance ranking buries the real prior art under
 off-topic hits, a "pass" is still only as good as that ranking. An empty
 result is additionally never a "pass" (see

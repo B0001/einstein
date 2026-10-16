@@ -19,7 +19,8 @@ so a reviewer does not have to reverse-engineer them:
 
 1. **Reject vs. force-pivot.** `gemini_convo.md` (background, not spec --
    line ~92) says only "if prior art exists above similarity threshold
-   theta>0.85, the idea is rejected or forced to pivot" -- one threshold,
+   theta>0.85, the idea is rejected or forced to pivot" (the number itself is
+   now a calibrated 0.25, see DEFAULT_THETA / einstein-wvc) -- one threshold,
    two outcomes, no rule for which. This module ties the split to *why* the
    bead asked for independent-claims comparison in the first place: a
    patent's independent claim is a legal scope statement (see
@@ -122,12 +123,18 @@ NoveltyVerdict = Literal["pass", "force_pivot", "reject", "unsearched"]
 PriorArtSide = Literal["paper", "patent"]
 NOVELTY_VERDICTS: tuple[str, ...] = get_args(NoveltyVerdict)
 
-# gemini_convo.md, "Novelty Auditor Agent": "If prior art exists above
-# similarity threshold theta>0.85, the idea is rejected or forced to
-# pivot." Background, not spec -- but the bead itself names no number, so
-# this is the one place a number for theta is written down at all. Treat
-# it as a knob (every call below accepts theta=), not a proven constant.
-DEFAULT_THETA = 0.85
+# Calibrated by `einstein_agents.novelty_calibration` (einstein-wvc), with
+# 10-paper pools like production: the largest theta that catches >= 90% of
+# ideas built from a paper's own text (measured 0.966, when that paper is in
+# the pool). Cost: false force_pivot on 6.5% of random-paper pools, 21% of
+# pools holding a same-subfield neighbor, and 40% for two-field
+# (method+problem) ideas against a neighbor. Production pools are same-topic,
+# so expect force_pivot often. The previous 0.85, from gemini_convo.md,
+# caught 0%. Paper side only: the patent side reuses this value uncalibrated,
+# so patent REJECTs at 0.25 are unmeasured (einstein-yy0). Still a knob (every
+# call below accepts theta=); rerun the calibration if the embedder, the pool
+# size or the idea text format changes.
+DEFAULT_THETA = 0.25
 
 SearchFn = Callable[[str], list[Record]]
 GrantTextFetchFn = Callable[[Record], GrantText]

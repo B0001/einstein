@@ -125,7 +125,8 @@ class Feasibility:
 def _build_prompt(idea: Idea) -> str:
     lines = [
         "You are the feasibility evaluator in an invention-ideation pipeline.",
-        "This method already survived an adversarial novelty audit; your job is to",
+        "A similarity-based novelty screen found no close prior art for this method",
+        "(a screen, not proof of novelty); your job is to",
         "assess whether actually building and running it is practical, not whether",
         "it is novel.",
         f"Candidate method: {idea.method}",
