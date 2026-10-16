@@ -250,7 +250,7 @@ def _self_check() -> None:
     ideas, notes = ideate([repo_gap], llm=_StubLLM())
     assert ideas == [] and len(notes) == 1, (ideas, notes)
 
-    print("einstein.ideator self-check: OK")
+    print("einstein_agents.ideator self-check: OK")
 
 
 if __name__ == "__main__":

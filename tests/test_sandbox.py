@@ -1,16 +1,16 @@
-"""Tests for einstein.sandbox: run GeneratedCode, self-heal on failure.
+"""Tests for einstein_agents.sandbox: run GeneratedCode, self-heal on failure.
 
 No network, no real subprocess, no real LLM -- every `run` here is a fake
-`RunFn` (see module docstring in einstein/sandbox.py for why `_default_run`
+`RunFn` (see module docstring in einstein_agents/sandbox.py for why `_default_run`
 itself, which shells out to `uv run --with qiskit... --with qiskit-aer...`,
 is never exercised by this file).
 """
 
 import unittest
 
-from einstein.codegen import DEFAULT_TARGET_LIBRARY, GeneratedCode
+from einstein_agents.codegen import DEFAULT_TARGET_LIBRARY, GeneratedCode
 from einstein.graph import AgentState, initial_state
-from einstein.sandbox import (
+from einstein_agents.sandbox import (
     DEFAULT_MAX_RETRIES,
     RepairParseError,
     RunResult,
@@ -176,7 +176,7 @@ class SelfHealFailureTest(unittest.TestCase):
 
 class RepairParseErrorTest(unittest.TestCase):
     def test_carries_gap_key_and_raw_response(self):
-        from einstein.sandbox import _extract_repaired_code
+        from einstein_agents.sandbox import _extract_repaired_code
 
         with self.assertRaises(RepairParseError) as ctx:
             _extract_repaired_code("no code here", gap_key="some-gap")

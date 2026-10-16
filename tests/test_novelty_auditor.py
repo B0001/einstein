@@ -1,14 +1,14 @@
-"""Tests for einstein.novelty_auditor: adversarial re-check of an Idea
+"""Tests for einstein_agents.novelty_auditor: adversarial re-check of an Idea
 against re-queried papers and patent claims, no network and no real LLM
-(see module docstring in einstein/novelty_auditor.py).
+(see module docstring in einstein_agents/novelty_auditor.py).
 """
 
 import inspect
 import unittest
 
 from einstein.graph import AgentState, initial_state
-from einstein.ideator import Idea
-from einstein.novelty_auditor import (
+from einstein_agents.ideator import Idea
+from einstein_agents.novelty_auditor import (
     Audit,
     PriorArtMatch,
     audit,

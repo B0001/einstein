@@ -34,7 +34,7 @@ so a reviewer does not have to reverse-engineer them:
    USPTO fetcher's docstring already sets the precedent for refusing to
    guess at an unverified external API's shape rather than fabricate a
    plausible-looking integration. `search_papers` is therefore a required
-   keyword argument with NO default (same pattern as `einstein.ideator`'s
+   keyword argument with NO default (same pattern as `einstein_agents.ideator`'s
    `llm` argument): callers wire in whatever paper-search backend they
    have (Semantic Scholar, an OpenAlex text search once one exists,
    whatever). `search_patents` DOES default to the real
@@ -47,7 +47,7 @@ Per the ideator's precedent ("the agent nodes need an LLM, and the tests
 must not"): the theta comparison that decides pass/force_pivot/reject is
 pure, deterministic code -- every number in an `Audit` comes from
 `cosine_similarity`, never from the model. `llm` (an
-`einstein.ideator.LLMClient`) is used only to narrate *why* a reject/
+`einstein_agents.ideator.LLMClient`) is used only to narrate *why* a reject/
 force_pivot fired, for a human reviewer -- and is never called on a "pass"
 verdict, so a domain with nothing to flag burns no LLM tokens (same
 reasoning as `einstein.graph`'s zero-gap route skipping the agents node
@@ -110,7 +110,7 @@ import numpy as np
 from sklearn.metrics.pairwise import cosine_similarity
 
 from einstein.embedding import Embedder, embed_groups
-from einstein.ideator import Idea, LLMClient
+from einstein_agents.ideator import Idea, LLMClient
 from einstein.patent_claims import ClaimsNotFoundError, independent_claims_for_record
 from einstein.schema import Record
 from einstein.uspto_fetcher import fetch_patents as _fetch_patents
@@ -523,7 +523,7 @@ def build_novelty_auditor_agent_node(
     Returns a callable matching `AgentNodeFn` (`AgentState -> dict`) that
     audits every idea in `state["ideas"]` and returns
     `{"audits": ..., "agent_notes": ...}`. Not wired as `build_graph`'s
-    default -- same reasoning as `einstein.ideator.build_ideator_agent_node`
+    default -- same reasoning as `einstein_agents.ideator.build_ideator_agent_node`
     not being the default: chaining ideator -> auditor -> feasibility into
     one graph is an integration decision for a later bead, and
     `search_papers` has no safe default to wire in anyway (see module
@@ -637,7 +637,7 @@ def _self_check() -> None:
     assert audits == [], audits
     assert len(notes) == 1 and "not audited" in notes[0], notes
 
-    print("einstein.novelty_auditor self-check: OK")
+    print("einstein_agents.novelty_auditor self-check: OK")
 
 
 if __name__ == "__main__":

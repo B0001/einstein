@@ -27,8 +27,8 @@ long query returns zero hits; rephrase shorter rather than read that as open.)
 already wrote down -- unchecked backlog items and bullets under "cannot
 claim" / "out of scope" / "open question" headings.
 
-    python -m einstein.triage candidates.json --root ~/Downloads [--out report.md]
-    python -m einstein.triage --harvest ~/Downloads/chem/specs ...
+    python -m einstein_agents.triage candidates.json --root ~/Downloads [--out report.md]
+    python -m einstein_agents.triage --harvest ~/Downloads/chem/specs ...
 """
 
 from __future__ import annotations
@@ -44,7 +44,7 @@ from typing import Literal
 import numpy as np
 
 from einstein.embedding import TfidfEmbedder
-from einstein.novelty_auditor import SearchFn
+from einstein_agents.novelty_auditor import SearchFn
 from einstein.schema import Record
 
 Status = Literal["read", "no_stakes", "no_edge", "search_failed", "search_empty"]
@@ -159,7 +159,7 @@ def render(results: list[Result]) -> str:
 
 
 def main(argv: list[str] | None = None) -> int:
-    ap = argparse.ArgumentParser(prog="python -m einstein.triage", description=__doc__.split("\n\n")[0])
+    ap = argparse.ArgumentParser(prog="python -m einstein_agents.triage", description=__doc__.split("\n\n")[0])
     ap.add_argument("candidates", nargs="?", type=Path)
     ap.add_argument("--root", type=Path, default=Path.cwd(), help="edge paths resolve against this")
     ap.add_argument("--out", type=Path)

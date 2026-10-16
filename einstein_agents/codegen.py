@@ -20,7 +20,7 @@ re-query, einstein-av1) was never checked against prior art at all.
 Generating code for any of them before that
 is resolved would ship a reference implementation of exactly the thing
 just flagged -- so `generate_code` asserts verdict == "pass" (same
-defensive-assert pattern as `einstein.ideator.ideate_gap` asserting
+defensive-assert pattern as `einstein_agents.ideator.ideate_gap` asserting
 `subject_type == "paper"`). The batch form, `generate`, skips a non-pass
 or missing audit with a note instead of raising, same as `ideate` skips
 repo-subject gaps and `audit` skips a failed re-query.
@@ -49,7 +49,7 @@ caller targeting a different library (or a different qiskit version)
 overrides it.
 
 Per this repo's standard for agent nodes ("the agent nodes need an LLM,
-and the tests must not"): `LLMClient` (reused from `einstein.ideator`) is
+and the tests must not"): `LLMClient` (reused from `einstein_agents.ideator`) is
 the one seam a real model call goes behind; everything this module is
 tested on -- prompt construction, code-fence extraction, which
 ideas/audits get codegen'd vs. skipped, failure handling -- is
@@ -75,8 +75,8 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass
 
-from einstein.ideator import Idea, LLMClient
-from einstein.novelty_auditor import Audit, PriorArtMatch
+from einstein_agents.ideator import Idea, LLMClient
+from einstein_agents.novelty_auditor import Audit, PriorArtMatch
 
 # Pinned against PyPI's published `qiskit` release at authoring time
 # (2026-09-24: `curl -s https://pypi.org/pypi/qiskit/json` -> "2.5.2").
@@ -213,12 +213,12 @@ def generate(
 
     Pairs `ideas` to `audits` by `gap_key`. An idea with no matching audit
     (never audited -- e.g. its re-query transport failed, see
-    `einstein.novelty_auditor.audit`'s own docstring) or a matching audit
+    `einstein_agents.novelty_auditor.audit`'s own docstring) or a matching audit
     that is not "pass" is skipped with a note rather than silently dropped
     or guessed at. A single idea's codegen failure -- a parse failure, or
     whatever exception its own `llm.generate` raises -- is caught here and
     turned into a note, not a fabricated `GeneratedCode`; it does not
-    abort the batch, same as `einstein.novelty_auditor.audit`.
+    abort the batch, same as `einstein_agents.novelty_auditor.audit`.
     """
     audits_by_gap_key = {a.gap_key: a for a in audits}
     generated: list[GeneratedCode] = []
@@ -342,7 +342,7 @@ def _self_check() -> None:
     generated, notes = generate([idea], [passing_audit], llm=NoFenceLLM())
     assert generated == [] and len(notes) == 1 and "codegen failed" in notes[0], notes
 
-    print("einstein.codegen self-check: OK")
+    print("einstein_agents.codegen self-check: OK")
 
 
 if __name__ == "__main__":

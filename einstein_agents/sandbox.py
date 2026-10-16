@@ -2,7 +2,7 @@
 codegen output against a real interpreter instead of trusting the LLM's say-
 so, and feed a failure's stderr back to the model for one more try.
 
-Per this repo's standard, `einstein.codegen.GeneratedCode.note` never says
+Per this repo's standard, `einstein_agents.codegen.GeneratedCode.note` never says
 more than "candidate reference implementation, not run or validated". This
 module is what actually runs it. It does NOT upgrade the result to "correct"
 or "novel" -- a successful run means "this snippet executed without raising,
@@ -15,7 +15,7 @@ cwd, in a fresh `uv run --no-project --isolated --with <target_library>
 --with <aer_version>` ephemeral environment (so a generated snippet's
 `import qiskit` resolves against the exact pinned version from the codegen
 prompt, without this repo ever adding qiskit/qiskit-aer to its own
-`pyproject.toml` -- same reasoning `einstein.codegen`'s docstring gives),
+`pyproject.toml` -- same reasoning `einstein_agents.codegen`'s docstring gives),
 with a stripped environment (`_sandbox_env`: PATH/HOME/UV_CACHE_DIR only --
 none of `GITHUB_TOKEN`/`USPTO_API_KEY`/`OPENALEX_MAILTO` reach code an LLM
 wrote and nothing here has audited), a wall-clock timeout, and
@@ -37,9 +37,9 @@ run by hand, same pattern as `scripts/harvest_gap_benchmark.py`.
 `self_heal`'s retry loop: attempt 0 is `generated.code` as-is. On failure,
 the failing code and its stderr go into a repair prompt (`_build_repair_
 prompt`) and back to the LLM; the response is parsed with the same one-
-fenced-` ```python ` -block convention `einstein.codegen._extract_code`
+fenced-` ```python ` -block convention `einstein_agents.codegen._extract_code`
 uses (parse failure here is `RepairParseError`, this module's own exception
--- not reused from `einstein.codegen.CodegenParseError`, following this
+-- not reused from `einstein_agents.codegen.CodegenParseError`, following this
 repo's existing pattern of one exception type per parse boundary:
 `IdeationParseError`, `CodegenParseError`, now this). This repeats up to
 `max_retries` times (`DEFAULT_MAX_RETRIES` is a knob, like
@@ -61,10 +61,10 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from pathlib import Path
 
-from einstein.codegen import DEFAULT_TARGET_LIBRARY, GeneratedCode
-from einstein.ideator import LLMClient
+from einstein_agents.codegen import DEFAULT_TARGET_LIBRARY, GeneratedCode
+from einstein_agents.ideator import LLMClient
 
-# Same fence convention `einstein.codegen._CODE_FENCE_RE` parses -- kept as this
+# Same fence convention `einstein_agents.codegen._CODE_FENCE_RE` parses -- kept as this
 # module's own copy rather than importing that private name, so a repair
 # response's parsing doesn't depend on codegen.py's internals.
 _CODE_FENCE_RE = re.compile(r"```(?:python)?[ \t]*\r?\n(.*?)```", re.DOTALL | re.IGNORECASE)
@@ -88,7 +88,7 @@ DEFAULT_MAX_RETRIES = 2
 class RepairParseError(Exception):
     """A repair response had no fenced ```python code block to extract.
 
-    Distinct from `einstein.codegen.CodegenParseError` per this repo's
+    Distinct from `einstein_agents.codegen.CodegenParseError` per this repo's
     one-exception-per-parse-boundary pattern (see module docstring). Carries
     `raw_response` for the same reason that one does: a caller can log or
     inspect exactly what the model said instead of a bare failure.
@@ -394,7 +394,7 @@ def _self_check() -> None:
     assert outcome.verdict == "validated", outcome
     assert len(outcome.attempts) == 1, outcome
 
-    print("einstein.sandbox self-check: OK")
+    print("einstein_agents.sandbox self-check: OK")
 
 
 if __name__ == "__main__":

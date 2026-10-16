@@ -1,11 +1,11 @@
-"""Tests for einstein.codegen: Idea + Audit -> candidate reference
+"""Tests for einstein_agents.codegen: Idea + Audit -> candidate reference
 implementation, no network and no real LLM (see module docstring in
-einstein/codegen.py).
+einstein_agents/codegen.py).
 """
 
 import unittest
 
-from einstein.codegen import (
+from einstein_agents.codegen import (
     CodegenParseError,
     DEFAULT_TARGET_LIBRARY,
     GeneratedCode,
@@ -14,8 +14,8 @@ from einstein.codegen import (
     generate_code,
 )
 from einstein.graph import AgentState, initial_state
-from einstein.ideator import Idea
-from einstein.novelty_auditor import Audit, PriorArtMatch
+from einstein_agents.ideator import Idea
+from einstein_agents.novelty_auditor import Audit, PriorArtMatch
 
 
 class StubLLM:

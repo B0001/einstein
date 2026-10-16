@@ -18,7 +18,7 @@ faster, more consistent rate limit than anonymous requests. This is optional
 -- OpenAlex works without it.
 
 `search_papers` (einstein-0.5) is the free-text paper search
-`einstein.novelty_auditor.audit_idea` needs and had no default for: given a
+`einstein_agents.novelty_auditor.audit_idea` needs and had no default for: given a
 method-text query, return the `Record`s OpenAlex thinks are relevant.
 OpenAlex exposes two ways to do that and they are not equivalent:
 
@@ -230,7 +230,7 @@ def search_papers(
 ) -> list[Record]:
     """Free-text search OpenAlex works matching `query`, mapped to Records.
 
-    Matches `einstein.novelty_auditor.SearchFn`
+    Matches `einstein_agents.novelty_auditor.SearchFn`
     (`Callable[[str], list[Record]]`) -- pass this directly as
     `audit_idea(search_papers=search_papers)`. Uses the relevance-ranked
     `search=` parameter, not the every-term-must-match

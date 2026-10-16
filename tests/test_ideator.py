@@ -1,5 +1,5 @@
-"""Tests for einstein.ideator: Gap -> structured Method/Problem pair, no
-network and no real LLM (see module docstring in einstein/ideator.py).
+"""Tests for einstein_agents.ideator: Gap -> structured Method/Problem pair, no
+network and no real LLM (see module docstring in einstein_agents/ideator.py).
 """
 
 import unittest
@@ -7,7 +7,7 @@ import unittest
 from einstein.arxiv_source import Equation, Section, SourceExtraction
 from einstein.gaps import Gap, Match
 from einstein.graph import AgentState, initial_state
-from einstein.ideator import (
+from einstein_agents.ideator import (
     Idea,
     IdeationParseError,
     build_ideator_agent_node,

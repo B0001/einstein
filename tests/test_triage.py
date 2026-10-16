@@ -5,7 +5,7 @@ import unittest
 from pathlib import Path
 
 from einstein.schema import Record
-from einstein.triage import Candidate, harvest, render, triage
+from einstein_agents.triage import Candidate, harvest, render, triage
 
 
 def _rec(i, title, summary=""):

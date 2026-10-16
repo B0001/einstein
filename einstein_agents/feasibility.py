@@ -8,11 +8,11 @@ feasibility -> codegen -> sandboxed validation, see `bd show einstein-0`).
 Per the bead graph, einstein-17 DEPENDS ON einstein-16 (novelty auditor)
 only. einstein-18 (codegen) depends on einstein-16 too, not on this bead --
 the two are siblings that both consume a passing `Audit` independently, not
-a chain (see `einstein.codegen`'s own module docstring making the same
+a chain (see `einstein_agents.codegen`'s own module docstring making the same
 point in reverse: "this bead DEPENDS ON einstein-16 only ... not on
 einstein-17"). So `evaluate_feasibility` takes an `Idea` (einstein-15) and
 its `Audit` (einstein-16) directly -- same signature shape as
-`einstein.codegen.generate_code` -- and asserts `audit.verdict == "pass"`
+`einstein_agents.codegen.generate_code` -- and asserts `audit.verdict == "pass"`
 for the same reason codegen does: a force_pivot idea needs to differentiate
 from prior art first, a reject idea is a candidate infringement risk, and
 spending compute/data/blueprint judgment on either would be assessing the
@@ -29,7 +29,7 @@ requirements, dataset availability, practical constraints" has no numeric
 threshold anywhere in the bead or in gemini_convo.md to compute against --
 nothing in this repo measures what a method costs to run or where its
 training data lives. So here the LLM performs the actual judgment, same
-shape as `einstein.ideator` (a structured labeled response, deterministic
+shape as `einstein_agents.ideator` (a structured labeled response, deterministic
 parse, `*ParseError` on a malformed reply) -- not the auditor's "LLM only
 narrates a pre-computed verdict" shape, because there is no pre-computed
 verdict here for it to narrate.
@@ -43,7 +43,7 @@ guessing which way to round it -- same "prefer abstention to a confident
 answer" reasoning `IdeationParseError` and `CodegenParseError` already
 establish in this codebase, and its own exception type per this repo's
 existing "one exception type per parse boundary" convention (see
-`einstein.sandbox`'s `RepairParseError` for the same call).
+`einstein_agents.sandbox`'s `RepairParseError` for the same call).
 
 Per this repo's standard that "a gap is a candidate until something
 measured says otherwise": a "go" verdict here is the model's own
@@ -55,7 +55,7 @@ work" -- the only *measured* evidence this pipeline produces is
 einstein-19's sandboxed run.
 
 Per this repo's standard for agent nodes ("the agent nodes need an LLM, and
-the tests must not"): `LLMClient` (reused from `einstein.ideator`) is the
+the tests must not"): `LLMClient` (reused from `einstein_agents.ideator`) is the
 one seam a real model call goes behind; everything this module is tested on
 -- prompt construction, section parsing, which idea/audit pairs get
 evaluated vs. skipped, failure handling -- is deterministic and model-free.
@@ -67,8 +67,8 @@ import re
 from dataclasses import dataclass
 from typing import Literal, get_args
 
-from einstein.ideator import Idea, LLMClient
-from einstein.novelty_auditor import Audit
+from einstein_agents.ideator import Idea, LLMClient
+from einstein_agents.novelty_auditor import Audit
 
 FeasibilityVerdict = Literal["go", "no_go"]
 FEASIBILITY_VERDICTS: tuple[str, ...] = get_args(FeasibilityVerdict)
@@ -215,14 +215,14 @@ def evaluate(
     """Evaluate feasibility for every idea whose audit survived. Returns
     `(assessments, notes)`.
 
-    Pairs `ideas` to `audits` by `gap_key`, same as `einstein.codegen.generate`.
+    Pairs `ideas` to `audits` by `gap_key`, same as `einstein_agents.codegen.generate`.
     An idea with no matching audit (never audited) or a matching audit that
     is not "pass" is skipped with a note rather than silently dropped or
     guessed at. A single idea's evaluation failure -- a parse failure, or
     whatever exception its own `llm.generate` raises -- is caught here and
     turned into a note, not a fabricated `Feasibility`; it does not abort
-    the batch, same as `einstein.novelty_auditor.audit` and
-    `einstein.codegen.generate`.
+    the batch, same as `einstein_agents.novelty_auditor.audit` and
+    `einstein_agents.codegen.generate`.
     """
     audits_by_gap_key = {a.gap_key: a for a in audits}
     assessments: list[Feasibility] = []
@@ -299,7 +299,7 @@ def _self_check() -> None:
     )
 
     def _match(against_type: str):
-        from einstein.novelty_auditor import PriorArtMatch
+        from einstein_agents.novelty_auditor import PriorArtMatch
 
         return PriorArtMatch(against_type=against_type, best_id=None, best_similarity=0.0, theta=0.85)
 
@@ -358,7 +358,7 @@ def _self_check() -> None:
     assessments, notes = evaluate([idea], [passing_audit], llm=MissingSectionLLM())
     assert assessments == [] and len(notes) == 1 and "feasibility evaluation failed" in notes[0], notes
 
-    print("einstein.feasibility self-check: OK")
+    print("einstein_agents.feasibility self-check: OK")
 
 
 if __name__ == "__main__":

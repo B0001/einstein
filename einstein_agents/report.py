@@ -15,7 +15,7 @@ What counts as a reportable "proposal", and what does not
 ------------------------------------------------------------
 Per the bead's own list -- "gap classification, novelty verdict,
 feasibility, working code, run evidence" -- a `Proposal` requires actual run
-evidence. A `GeneratedCode` that was never handed to `einstein.sandbox.
+evidence. A `GeneratedCode` that was never handed to `einstein_agents.sandbox.
 self_heal` has no run evidence and is not "working code", just a candidate
 string nobody has executed -- so `build_proposals` builds one `Proposal` per
 `SandboxOutcome`, not per `GeneratedCode` or per surviving `Audit`. A
@@ -56,12 +56,12 @@ import json
 from dataclasses import asdict, dataclass
 from typing import Literal, get_args
 
-from einstein.codegen import GeneratedCode
-from einstein.feasibility import Feasibility
+from einstein_agents.codegen import GeneratedCode
+from einstein_agents.feasibility import Feasibility
 from einstein.gaps import Gap
-from einstein.ideator import Idea
-from einstein.novelty_auditor import Audit
-from einstein.sandbox import SandboxOutcome
+from einstein_agents.ideator import Idea
+from einstein_agents.novelty_auditor import Audit
+from einstein_agents.sandbox import SandboxOutcome
 
 SandboxStatus = Literal["validated", "repaired", "failed"]
 SANDBOX_STATUSES: tuple[str, ...] = get_args(SandboxStatus)
@@ -141,7 +141,7 @@ def _build_proposal(
     assert audit.verdict == "pass", (
         f"proposal for {outcome.gap_key!r} pairs a sandbox outcome with a non-passing "
         f"audit ({audit.verdict!r}) -- this is a caller pairing bug, not a real chain "
-        "(only a passing audit's idea is ever codegen'd, see einstein.codegen)"
+        "(only a passing audit's idea is ever codegen'd, see einstein_agents.codegen)"
     )
     if feasibility is not None:
         assert feasibility.gap_key == outcome.gap_key, (feasibility.gap_key, outcome.gap_key)
@@ -285,7 +285,7 @@ def _render_proposal_markdown(p: Proposal) -> list[str]:
     else:
         lines.append(
             "- **feasibility:** not assessed for this idea (feasibility and codegen run "
-            "independently -- see einstein.feasibility module docstring)"
+            "independently -- see einstein_agents.feasibility module docstring)"
         )
     lines.append(f"- **sandbox status:** `{p.sandbox_status}` ({p.sandbox_attempts} attempt(s)) -- {p.sandbox_note}")
     lines.append("")
@@ -387,7 +387,7 @@ def _self_check() -> None:
     )
 
     def _prior_art_match(against_type: str):
-        from einstein.novelty_auditor import PriorArtMatch
+        from einstein_agents.novelty_auditor import PriorArtMatch
 
         return PriorArtMatch(against_type=against_type, best_id=None, best_similarity=0.0, theta=0.85)
 
@@ -465,7 +465,7 @@ def _self_check() -> None:
     )
     assert empty_result == {"proposals": [], "agent_notes": ["report: 0 proposal(s) from 0 sandbox outcome(s)"]}, empty_result
 
-    print("einstein.report self-check: OK")
+    print("einstein_agents.report self-check: OK")
 
 
 if __name__ == "__main__":

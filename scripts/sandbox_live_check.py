@@ -1,7 +1,7 @@
-"""One-time, hand-run script: exercise `einstein.sandbox.self_heal` against a
+"""One-time, hand-run script: exercise `einstein_agents.sandbox.self_heal` against a
 real `uv run --with qiskit... --with qiskit-aer...` subprocess -- the one
 thing `tests/test_sandbox.py` cannot do, since it hits the network to
-resolve those packages (see einstein/sandbox.py's module docstring on why
+resolve those packages (see einstein_agents/sandbox.py's module docstring on why
 `_default_run` is never exercised by `tests/`).
 
 There is no real LLM wired into this sandbox environment, so "feed stderr
@@ -33,8 +33,8 @@ cache; subsequent runs are fast, ~2s, from cache.)
 
 from __future__ import annotations
 
-from einstein.codegen import DEFAULT_TARGET_LIBRARY, GeneratedCode
-from einstein.sandbox import DEFAULT_AER_VERSION, self_heal
+from einstein_agents.codegen import DEFAULT_TARGET_LIBRARY, GeneratedCode
+from einstein_agents.sandbox import DEFAULT_AER_VERSION, self_heal
 
 
 class _ScriptedRepairLLM:

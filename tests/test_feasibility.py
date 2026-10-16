@@ -1,11 +1,11 @@
-"""Tests for einstein.feasibility: Idea + Audit -> go/no-go feasibility
+"""Tests for einstein_agents.feasibility: Idea + Audit -> go/no-go feasibility
 assessment, no network and no real LLM (see module docstring in
-einstein/feasibility.py).
+einstein_agents/feasibility.py).
 """
 
 import unittest
 
-from einstein.feasibility import (
+from einstein_agents.feasibility import (
     Feasibility,
     FeasibilityParseError,
     build_feasibility_agent_node,
@@ -13,8 +13,8 @@ from einstein.feasibility import (
     evaluate_feasibility,
 )
 from einstein.graph import AgentState, initial_state
-from einstein.ideator import Idea
-from einstein.novelty_auditor import Audit, PriorArtMatch
+from einstein_agents.ideator import Idea
+from einstein_agents.novelty_auditor import Audit, PriorArtMatch
 
 
 class StubLLM:

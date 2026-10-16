@@ -19,6 +19,14 @@ uv run python -m unittest discover tests
 `uv run` writes its virtualenv to `/tmp/venv` in this container
 (`UV_PROJECT_ENVIRONMENT`) — the mounted host `.venv` is not used here.
 
+## Experimental agent stages (`einstein_agents/`)
+
+The ideator, novelty auditor, feasibility, codegen, sandbox, report and triage
+stages live in `einstein_agents/`, outside the shipped `einstein` package
+(einstein-p03). None of them is wired into the CLI, and there is no concrete
+`LLMClient`. They are tested and importable from a checkout but are left out
+of the wheel.
+
 ## CLI (`einstein-21`)
 
 ```bash

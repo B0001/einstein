@@ -1,26 +1,26 @@
-"""Tests for einstein.report: correlate gap/idea/audit/feasibility/codegen/
+"""Tests for einstein_agents.report: correlate gap/idea/audit/feasibility/codegen/
 sandbox output by gap_key into Proposal objects, and render JSON/Markdown.
 No network, no LLM -- this module never calls one (see module docstring in
-einstein/report.py).
+einstein_agents/report.py).
 """
 
 import json
 import unittest
 
-from einstein.codegen import GeneratedCode
-from einstein.feasibility import Feasibility
+from einstein_agents.codegen import GeneratedCode
+from einstein_agents.feasibility import Feasibility
 from einstein.gaps import Gap, Match
 from einstein.graph import AgentState, initial_state
-from einstein.ideator import Idea
-from einstein.novelty_auditor import Audit, PriorArtMatch
-from einstein.report import (
+from einstein_agents.ideator import Idea
+from einstein_agents.novelty_auditor import Audit, PriorArtMatch
+from einstein_agents.report import (
     Proposal,
     build_proposals,
     build_report_agent_node,
     render_json,
     render_markdown,
 )
-from einstein.sandbox import Attempt, RunResult, SandboxOutcome
+from einstein_agents.sandbox import Attempt, RunResult, SandboxOutcome
 
 GAP = Gap(
     kind="true_invention_gap",

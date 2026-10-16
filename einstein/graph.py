@@ -76,23 +76,23 @@ class AgentState(TypedDict):
     zero-gap run -- that is the acceptance criterion this module exists to
     satisfy). `ideas` likewise starts empty and is only populated by an
     `agent_node` that chooses to return it (the default stub does not; the
-    einstein-15 ideator node, `einstein.ideator.build_ideator_agent_node`,
+    einstein-15 ideator node, `einstein_agents.ideator.build_ideator_agent_node`,
     does). `audits` is the same story one stage later: only populated by
     the einstein-16 novelty auditor node,
-    `einstein.novelty_auditor.build_novelty_auditor_agent_node`.
+    `einstein_agents.novelty_auditor.build_novelty_auditor_agent_node`.
     `feasibility` is populated independently of `generated_code`, by the
-    einstein-17 feasibility node, `einstein.feasibility.build_feasibility_
+    einstein-17 feasibility node, `einstein_agents.feasibility.build_feasibility_
     agent_node` -- both consume `ideas`/`audits` directly and are siblings,
-    not a chain (see `einstein.feasibility`'s module docstring). `generated_
+    not a chain (see `einstein_agents.feasibility`'s module docstring). `generated_
     code` is one stage later still: only populated by the einstein-18
-    codegen node, `einstein.codegen.build_codegen_agent_node`.
+    codegen node, `einstein_agents.codegen.build_codegen_agent_node`.
     `sandbox_outcomes` is one stage further: only populated by the
-    einstein-19 sandbox/self-heal node, `einstein.sandbox.
+    einstein-19 sandbox/self-heal node, `einstein_agents.sandbox.
     build_sandbox_agent_node`. `proposals` is the last stage: only
-    populated by the einstein-20 report node, `einstein.report.
+    populated by the einstein-20 report node, `einstein_agents.report.
     build_report_agent_node` -- it correlates every prior field by
     `gap_key` into one `Proposal` per `sandbox_outcomes` entry (see
-    `einstein.report`'s module docstring for why it iterates the sandbox
+    `einstein_agents.report`'s module docstring for why it iterates the sandbox
     outcomes rather than the ideas or audits). All six are left untyped as
     `list` rather than `list[Idea]` / `list[Audit]` / `list[Feasibility]` /
     `list[GeneratedCode]` / `list[SandboxOutcome]` / `list[Proposal]` so
