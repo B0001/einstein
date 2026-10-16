@@ -9,12 +9,12 @@ Flags map directly onto what the graph already takes: `--repo-threshold` /
 why 0.2 is not a magic-clean number), and `--skip-papers` / `--skip-repos`
 / `--skip-patents` to leave a corpus empty on purpose.
 
-That last point is the one worth being careful about. `einstein/gaps.py`'s
-module docstring is explicit: "a run with `patents=[]` still marks every
-low-repo paper `true_invention_gap`" -- this module cannot tell the
-difference between "nobody looked" and "looked, found nothing" from the
-`AgentState` alone. So this CLI keeps the two failure modes visibly separate
-at the one place that still has the information to do so:
+That last point is the one worth being careful about. With `patents=[]`,
+`einstein/gaps.py` marks low-repo papers `unbuilt_no_patent_evidence`, never
+`true_invention_gap` (einstein-eg9). It still cannot tell "nobody looked"
+from "looked, found nothing" from the `AgentState` alone, so this CLI keeps
+the two failure modes visibly separate at the one place that still has the
+information to do so:
 
 - `--skip-<source>` is a *user* choice not to search. The report says
   "skipped (--skip-x)", never a bare zero.
@@ -287,7 +287,7 @@ class _CrossPollinationGap:
     `matches`/`to_payload()` shape `einstein.velocity.score_gaps` and
     `Store.upsert_gap` expect. Not a real `einstein.gaps.Gap`: `GapKind` is a
     closed `Literal` (`true_invention_gap`/`open_source_disruption_target`/
-    `unformalized_code`) that does not include, and must not be widened to
+    `unbuilt_no_patent_evidence`/`unformalized_code`) that does not include, and must not be widened to
     include, "cross_pollination" -- `einstein.gaps.detect_gaps`'s own
     self-check asserts its output kinds equal `GAP_KINDS` exactly. `Store`
     itself already treats `kind` as an open string for this reason (see its
@@ -376,7 +376,9 @@ def run(args: argparse.Namespace) -> tuple[AgentState, dict, dict | None, dict |
     GitHub/arXiv-source fetches (tagged with source `"constraint_mining"`).
     """
     fetchers, status, _ = _make_fetchers(args)
-    with Store(args.db) as store:
+    # Gaps are written only if the whole run, opt-in steps included,
+    # succeeds (einstein-luu); see `Store.deferred_gap_writes`.
+    with Store(args.db) as store, store.deferred_gap_writes():
         graph = build_graph(
             fetch_papers=fetchers["papers"],
             fetch_repos=fetchers["repos"],

@@ -263,8 +263,8 @@ def _self_check() -> None:
     assert result["agent_notes"] == [], result["agent_notes"]
     assert calls["agents"] == 0, "agents node must not run on a zero-gap route"
 
-    # Nonzero-gap fixture: unrelated repo, so the paper is a true_invention_gap
-    # and the graph must route into the agents node.
+    # Nonzero-gap fixture: unrelated repo and no patents, so the paper is an
+    # unbuilt_no_patent_evidence gap and the graph must route into the agents node.
     gap_papers = [paper("p2", "Tensor network attention", "novel tensor contraction for transformer attention")]
     unrelated_repos = [repo("o/k8s-tool", "k8s-tool", "command line tool for kubernetes deployment pipelines")]
 
@@ -276,9 +276,9 @@ def _self_check() -> None:
     )
     result = nonzero_gap_graph.invoke(initial_state("optimization", repo_threshold=0.3, patent_threshold=0.3))
     # The unrelated repo is itself a gap (unformalized_code) alongside the paper's
-    # true_invention_gap -- detect_gaps reads both directions of the same matrix.
+    # gap -- detect_gaps reads both directions of the same matrix.
     gap_kinds = {g.subject_id: g.kind for g in result["gaps"]}
-    assert gap_kinds == {"p2": "true_invention_gap", "o/k8s-tool": "unformalized_code"}, gap_kinds
+    assert gap_kinds == {"p2": "unbuilt_no_patent_evidence", "o/k8s-tool": "unformalized_code"}, gap_kinds
     assert calls["agents"] == 1, "agents node must run exactly once on a nonzero-gap route"
     assert len(result["agent_notes"]) == 1, result["agent_notes"]
 

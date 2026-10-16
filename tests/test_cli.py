@@ -13,6 +13,7 @@ from einstein.gaps import DEFAULT_PATENT_THRESHOLD, DEFAULT_REPO_THRESHOLD
 from einstein.github_fetcher import GitHubFetchError, Issue
 from einstein.openalex_fetcher import Edge, OpenAlexFetchError
 from einstein.schema import Record
+from einstein.store import Store
 from einstein.uspto_fetcher import USPTOFetchError
 
 
@@ -138,7 +139,7 @@ class RunTest(_CliTestCase):
         self.assertEqual(state["repos"], [])
         self.assertEqual(state["patents"], [])
 
-    def test_detects_a_true_invention_gap_and_routes_through_agents_stub(self):
+    def test_detects_a_paper_gap_and_routes_through_agents_stub(self):
         papers = [_paper("p2", "Tensor network attention", "novel tensor contraction for transformer attention")]
         repos = [_repo("o/k8s-tool", "k8s-tool", "command line tool for kubernetes deployment pipelines")]
         args = self.parse_args(["optimization", "--repo-threshold", "0.3", "--patent-threshold", "0.3"])
@@ -149,7 +150,7 @@ class RunTest(_CliTestCase):
             state, _, _, _ = cli.run(args)
 
         gap_kinds = {g.subject_id: g.kind for g in state["gaps"]}
-        self.assertEqual(gap_kinds, {"p2": "true_invention_gap", "o/k8s-tool": "unformalized_code"})
+        self.assertEqual(gap_kinds, {"p2": "unbuilt_no_patent_evidence", "o/k8s-tool": "unformalized_code"})
         self.assertEqual(len(state["agent_notes"]), 1)
 
     def test_live_fetch_failure_raises_source_fetch_error_not_empty_result(self):
@@ -189,7 +190,6 @@ class RunTest(_CliTestCase):
         self.assertEqual(len(state["scored_gaps"]), 2)
         self.assertTrue(all(sg.is_new for sg in state["scored_gaps"]))
 
-        from einstein.store import Store
         with Store(self.db_path) as store:
             self.assertEqual(len(store.all_gaps()), 2)
 
@@ -247,7 +247,6 @@ class RunTest(_CliTestCase):
         self.assertEqual(candidate["method_id"], "W1")
         self.assertTrue(candidate["velocity"]["is_new"])
 
-        from einstein.store import Store
         with Store(self.db_path) as store:
             stored = store.all_gaps()
             self.assertEqual(len(stored), 1)
@@ -357,7 +356,6 @@ class RunTest(_CliTestCase):
         self.assertEqual(sorted(widespread[0]["source_ids"]), ["2101.00001", "someone/lib"])
         self.assertTrue(widespread[0]["velocity"]["is_new"])
 
-        from einstein.store import Store
         with Store(self.db_path) as store:
             stored = store.all_gaps()
             constraint_rows = [g for g in stored if g["kind"] == "constraint_cluster"]
@@ -401,6 +399,26 @@ class RunTest(_CliTestCase):
                 cli.run(args)
 
         self.assertEqual(ctx.exception.source, "constraint_mining")
+        with Store(self.db_path) as store:
+            self.assertEqual(store.all_gaps(), [], "a failed run must not persist its main gaps")
+
+    def test_cross_pollinate_failure_after_main_gaps_persists_nothing(self):
+        papers = [_paper("p2", "Tensor network attention", "novel tensor contraction for transformer attention")]
+        repos = [_repo("o/k8s-tool", "k8s-tool", "command line tool for kubernetes deployment pipelines")]
+        args = self.parse_args([
+            "optimization", "--repo-threshold", "0.3", "--patent-threshold", "0.3",
+            "--cross-pollinate", "biology",
+        ])
+
+        with patch.object(cli, "_fetch_papers", return_value=papers), \
+             patch.object(cli, "_fetch_repos", return_value=repos), \
+             patch.object(cli, "_fetch_patents", return_value=[]), \
+             patch.object(cli, "_search_papers", side_effect=OpenAlexFetchError(500, "boom")):
+            with self.assertRaises(cli.SourceFetchError):
+                cli.run(args)
+
+        with Store(self.db_path) as store:
+            self.assertEqual(store.all_gaps(), [])
 
 
 class MainTest(unittest.TestCase):
@@ -429,7 +447,7 @@ class MainTest(unittest.TestCase):
         text = out.getvalue()
         self.assertIn("domain: optimization", text)
         self.assertIn("papers: fetched 1 record(s)", text)
-        self.assertIn("true_invention_gap", text)
+        self.assertIn("unbuilt_no_patent_evidence", text)
         self.assertIn("unformalized_code", text)
 
     def test_json_report_is_valid_json_with_gap_and_source_detail(self):
@@ -448,8 +466,8 @@ class MainTest(unittest.TestCase):
         self.assertEqual(report["domain"], "optimization")
         self.assertEqual(report["sources"]["repos"], {"status": "fetched", "reason": None, "count": 0})
         self.assertEqual(len(report["gaps"]), 1)
-        self.assertEqual(report["gaps"][0]["kind"], "true_invention_gap")
-        self.assertEqual(report["gap_counts"], {"true_invention_gap": 1})
+        self.assertEqual(report["gaps"][0]["kind"], "unbuilt_no_patent_evidence")
+        self.assertEqual(report["gap_counts"], {"unbuilt_no_patent_evidence": 1})
 
     def test_skip_flags_produce_report_with_no_network_calls(self):
         out = io.StringIO()

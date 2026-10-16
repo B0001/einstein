@@ -122,7 +122,7 @@ class GraphEndToEndTest(unittest.TestCase):
         result = graph.invoke(initial_state("optimization", repo_threshold=0.3, patent_threshold=0.3))
 
         gap_kinds = {g.subject_id: g.kind for g in result["gaps"]}
-        self.assertEqual(gap_kinds, {"p2": "true_invention_gap", "o/k8s-tool": "unformalized_code"})
+        self.assertEqual(gap_kinds, {"p2": "unbuilt_no_patent_evidence", "o/k8s-tool": "unformalized_code"})
         self.assertEqual(len(agent.calls), 1, "agents node must run exactly once")
         self.assertEqual(result["agent_notes"], ["recorded 2 gap(s)"])
 

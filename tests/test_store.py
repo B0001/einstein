@@ -49,6 +49,29 @@ class StoreTest(unittest.TestCase):
         self.store = Store(self.db_path, clock=lambda: next(self._ticks))
         self.addCleanup(self.store.close)
 
+    def test_deferred_gap_writes_land_on_clean_exit_with_call_time_timestamps(self):
+        with self.store.deferred_gap_writes():
+            self.store.upsert_gap("g1", "true_invention_gap", {"v": 1})
+            self.store.upsert_record(_record())  # commits records mid-block
+            self.assertIsNone(self.store.get_gap("g1"), "buffered gap must not be visible or committed yet")
+        gap = self.store.get_gap("g1")
+        self.assertEqual(gap["payload"], {"v": 1})
+        self.assertEqual(gap["first_seen"], "2026-08-08T00:00:00+00:00")
+
+    def test_deferred_gap_writes_discarded_on_exception(self):
+        with self.assertRaises(RuntimeError):
+            with self.store.deferred_gap_writes():
+                self.store.upsert_gap("g1", "true_invention_gap", {"v": 1})
+                self.store.upsert_record(_record())
+                raise RuntimeError("fetch failed")
+        self.assertEqual(self.store.all_gaps(), [])
+        self.assertEqual(len(self.store.all_records()), 1, "record cache writes are kept")
+        reopened = Store(self.db_path, clock=lambda: "2026-08-12T00:00:00+00:00")
+        self.addCleanup(reopened.close)
+        self.assertEqual(reopened.all_gaps(), [])
+        self.store.upsert_gap("g2", "true_invention_gap", {})  # back to immediate writes
+        self.assertIsNotNone(reopened.get_gap("g2"))
+
     def test_upsert_record_inserts_new_row(self):
         self.store.upsert_record(_record())
         self.assertEqual(len(self.store.all_records()), 1)

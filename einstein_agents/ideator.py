@@ -12,7 +12,7 @@ model-free. No LLM SDK is a project dependency; a caller wires a real one in
 by implementing `LLMClient`, this module never imports one.
 
 Only `subject_type == "paper"` gaps (`true_invention_gap` /
-`open_source_disruption_target`) are ideated. A `repo`-subject
+`open_source_disruption_target` / `unbuilt_no_patent_evidence`) are ideated. A `repo`-subject
 `unformalized_code` gap has no Problem/Method framing to invert -- someone
 already built the thing, there is no candidate method to extract from a
 `Gap` alone (that would require reading the repo's own source, out of this

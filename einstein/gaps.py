@@ -8,7 +8,7 @@ only that this run, over this index, found none above `threshold`. Downstream
 consumers (the ideator, the report) must preserve that framing; nothing here
 is "novel" or "unprecedented", only "unmatched in this index".
 
-Three classes come out of the paper x repo and paper x patent matrices:
+Four classes come out of the paper x repo and paper x patent matrices:
 
 - ``true_invention_gap``: a paper with no close repo AND no close patent.
   Nobody has built it and nobody has filed on it -- the highest-value class,
@@ -16,18 +16,27 @@ Three classes come out of the paper x repo and paper x patent matrices:
   real void (see einstein-0.1, which measures that).
 - ``open_source_disruption_target``: a paper with no close repo but a close
   patent. Someone filed on the idea; nobody has shipped open code for it.
+- ``unbuilt_no_patent_evidence``: a paper with no close repo, in a run with
+  no patents to compare against (skipped, or the search returned zero hits;
+  a zero-hit search from a 10-result query is not evidence that nobody filed).
+  It would have been one of the two classes above, but which one is
+  unknown, so it is never presented as the high-value ``true_invention_gap``
+  (einstein-eg9).
 - ``unformalized_code``: a repo with no close paper. Someone built something
   with no theoretical grounding surfaced in this index -- could be original
   engineering, could be an unindexed paper.
 
 Missing corpora are not evidence of a gap by omission -- they are evidence
-this run had nothing to check against. A run with `patents=[]` still marks
-every low-repo paper `true_invention_gap`, because "zero patents fetched"
-and "zero patents found similar" are indistinguishable from inside this
-function. Callers that fetched zero patents because of a rate limit, not
-because none exist, must not present that output as if the patent space had
-been searched. That is exactly the failure mode einstein-0.1 exists to
-measure, not something this module can detect from its own inputs.
+this run had nothing to check against. A run with `patents=[]` therefore
+marks low-repo papers `unbuilt_no_patent_evidence`, not `true_invention_gap`
+(einstein-eg9). The class lives in `gap_key`, so once patents are searched
+the same paper gets a new row under its real class, and the old one simply
+stops being seen. Because the class is in the key, that new row starts with
+no velocity history (`trend="new"`). This already happens when a paper flips
+between `true_invention_gap` and `open_source_disruption_target`, and it now
+also happens when patent availability changes between runs. Empty paper or repo corpora are still treated as "nothing
+matched" (see the empty-corpus tests); the patent side is singled out
+because it decides the top-value class.
 """
 
 from __future__ import annotations
@@ -41,7 +50,9 @@ from sklearn.metrics.pairwise import cosine_similarity
 from einstein.embedding import Embedder, embed_groups
 from einstein.schema import Record, RecordType
 
-GapKind = Literal["true_invention_gap", "open_source_disruption_target", "unformalized_code"]
+GapKind = Literal[
+    "true_invention_gap", "open_source_disruption_target", "unbuilt_no_patent_evidence", "unformalized_code"
+]
 GAP_KINDS: tuple[str, ...] = get_args(GapKind)
 
 DEFAULT_REPO_THRESHOLD = 0.2
@@ -138,7 +149,7 @@ def detect_gaps(
     patent_threshold: float = DEFAULT_PATENT_THRESHOLD,
     embedder: Embedder | None = None,
 ) -> list[Gap]:
-    """Classify papers and repos into the three gap classes.
+    """Classify papers and repos into the four gap classes.
 
     Fits one embedder over the union of paper/repo/patent text (via
     `embed_groups`) so the three corpora share a vector space, then computes
@@ -146,7 +157,8 @@ def detect_gaps(
 
     A paper is a gap when its best repo match is below `repo_threshold`:
     `true_invention_gap` if its best patent match is also below
-    `patent_threshold`, `open_source_disruption_target` if not. A paper with
+    `patent_threshold`, `open_source_disruption_target` if not, and
+    `unbuilt_no_patent_evidence` if `patents` is empty. A paper with
     a close repo match is not a gap regardless of patent status -- it has
     already been implemented.
 
@@ -193,7 +205,13 @@ def detect_gaps(
         if not repo_match.below_threshold:
             continue  # already implemented somewhere in this index -- not a gap
 
-        kind: GapKind = "true_invention_gap" if patent_match.below_threshold else "open_source_disruption_target"
+        kind: GapKind
+        if not patents:
+            kind = "unbuilt_no_patent_evidence"  # no patent evidence either way (einstein-eg9)
+        elif patent_match.below_threshold:
+            kind = "true_invention_gap"
+        else:
+            kind = "open_source_disruption_target"
         gaps.append(
             Gap(
                 kind=kind,
@@ -260,7 +278,11 @@ def _self_check() -> None:
     assert "implemented" not in by_kind, by_kind
     assert by_kind.get("someone/orphan-tool") == "unformalized_code", by_kind
     assert "someone/sgd-bounds" not in by_kind, by_kind
-    assert {g.kind for g in gaps} == set(GAP_KINDS), {g.kind for g in gaps}
+    assert {g.kind for g in gaps} == set(GAP_KINDS) - {"unbuilt_no_patent_evidence"}, {g.kind for g in gaps}
+
+    no_patents = {g.subject_id: g.kind for g in detect_gaps(papers, repos, [], repo_threshold=0.3, patent_threshold=0.3)}
+    assert no_patents.get("true-gap") == "unbuilt_no_patent_evidence", no_patents
+    assert no_patents.get("disruption") == "unbuilt_no_patent_evidence", no_patents
 
     print("einstein.gaps self-check: OK")
 

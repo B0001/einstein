@@ -58,7 +58,8 @@ from __future__ import annotations
 
 import json
 import sqlite3
-from collections.abc import Callable, Sequence
+from collections.abc import Callable, Iterator, Sequence
+from contextlib import contextmanager
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
@@ -150,6 +151,7 @@ class Store:
 
     def __init__(self, db_path: str | Path, *, clock: Callable[[], str] = _default_clock) -> None:
         self._clock = clock
+        self._pending_gaps: list[tuple[str, str, dict, str]] | None = None
         self._conn = sqlite3.connect(str(db_path))
         self._conn.execute("PRAGMA foreign_keys = ON")
         self._conn.executescript(_SCHEMA)
@@ -166,6 +168,26 @@ class Store:
         clock a test injected here.
         """
         return self._clock()
+
+    @contextmanager
+    def deferred_gap_writes(self) -> Iterator[None]:
+        """Buffer every `upsert_gap` in this block and write them only if it
+        exits cleanly (einstein-luu). A run that fails partway therefore
+        leaves no gaps behind, so the next run does not score them as
+        already seen. Record and query caching is unaffected: those writes
+        are safe to keep. Each buffered row keeps the clock time of its
+        `upsert_gap` call. Reads inside the block do not see buffered gaps.
+        """
+        assert self._pending_gaps is None, "deferred_gap_writes does not nest"
+        self._pending_gaps = []
+        try:
+            yield
+            pending = self._pending_gaps
+        finally:
+            self._pending_gaps = None
+        for gap_key, kind, payload, now in pending:
+            self._write_gap(gap_key, kind, payload, now, commit=False)
+        self._conn.commit()
 
     def __enter__(self) -> "Store":
         return self
@@ -236,8 +258,15 @@ class Store:
         einstein-11/13 wants to remember about the gap. `kind` is a short
         classifier label (e.g. the gap class), kept as its own column so a
         caller can filter by it without deserializing `payload`.
+        Inside `deferred_gap_writes`, the write is buffered instead.
         """
         now = self._clock()
+        if self._pending_gaps is not None:
+            self._pending_gaps.append((gap_key, kind, payload, now))
+            return
+        self._write_gap(gap_key, kind, payload, now)
+
+    def _write_gap(self, gap_key: str, kind: str, payload: dict, now: str, *, commit: bool = True) -> None:
         self._conn.execute(
             """
             INSERT INTO gaps (gap_key, kind, payload, first_seen, last_seen)
@@ -254,7 +283,8 @@ class Store:
                 "now": now,
             },
         )
-        self._conn.commit()
+        if commit:
+            self._conn.commit()
 
     def get_gap(self, gap_key: str) -> dict | None:
         row = self._conn.execute(

@@ -141,9 +141,17 @@ class DetectGapsTest(unittest.TestCase):
         gaps = detect_gaps(PAPERS, REPOS, PATENTS, repo_threshold=0.3, patent_threshold=0.3, **kwargs)
         return {g.subject_id: g for g in gaps}
 
-    def test_yields_all_three_classes_on_fixture_data(self):
+    def test_yields_all_searched_classes_on_fixture_data(self):
         by_subject = self._gaps_by_subject()
-        self.assertEqual({g.kind for g in by_subject.values()}, set(GAP_KINDS))
+        self.assertEqual({g.kind for g in by_subject.values()}, set(GAP_KINDS) - {"unbuilt_no_patent_evidence"})
+
+    def test_empty_patent_corpus_never_yields_true_invention_gap(self):
+        gaps = detect_gaps(PAPERS, REPOS, [], repo_threshold=0.3, patent_threshold=0.3)
+        by_subject = {g.subject_id: g.kind for g in gaps}
+        self.assertEqual(by_subject["true-gap"], "unbuilt_no_patent_evidence")
+        self.assertEqual(by_subject["disruption"], "unbuilt_no_patent_evidence")
+        self.assertNotIn("true_invention_gap", by_subject.values())
+        self.assertEqual(by_subject["someone/orphan-tool"], "unformalized_code")
 
     def test_paper_with_no_repo_or_patent_match_is_true_invention_gap(self):
         by_subject = self._gaps_by_subject()

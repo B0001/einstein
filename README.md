@@ -119,7 +119,8 @@ before a DAG engine, since this is a linear pipeline:
   one domain and uploads the JSON report as a build artifact. Uses the job's
   own `GITHUB_TOKEN` for the GitHub fetcher's higher rate limit; passes
   `--skip-patents` automatically if the `USPTO_API_KEY` repo secret is not
-  set.
+  set. Without patents, paper gaps are reported as
+  `unbuilt_no_patent_evidence`, never `true_invention_gap`.
 - `scripts/nightly_run.sh` — the same wrapper for a self-hosted `cron`,
   writing timestamped JSON reports under `./reports/`.
 
@@ -276,7 +277,8 @@ precision ceiling.
 
 - **Patent axis unmeasured.** `detect_gaps` also checks a patent corpus
   (`patent_threshold`) to distinguish `true_invention_gap` from
-  `open_source_disruption_target`, but only the repo axis decides whether a
+  `open_source_disruption_target` (with no patents at all, a low-repo paper
+  is `unbuilt_no_patent_evidence` instead), but only the repo axis decides whether a
   paper is a gap *at all* — a paper with a close repo match is never a gap
   regardless of patent status. This benchmark's positive/negative arms are
   built entirely on the repo axis for that reason. A patent-citing-arXiv
