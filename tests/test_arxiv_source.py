@@ -165,6 +165,12 @@ class NoTexSourceTest(unittest.TestCase):
         self.assertEqual(ctx.exception.arxiv_id, "old.0001")
         self.assertIsInstance(ctx.exception, ArxivSourceError)
 
+    def test_bare_non_gzipped_pdf_raises_no_tex_source_error(self):
+        http = FakeHttp(FakeResponse(200, b"%PDF-1.4 fake pdf content"))
+
+        with self.assertRaises(NoTexSourceError):
+            extract_source("old.0001", http=http)
+
     def test_tarball_with_no_tex_members_raises_no_tex_source_error(self):
         buf = io.BytesIO()
         with tarfile.open(fileobj=buf, mode="w:gz") as tar:

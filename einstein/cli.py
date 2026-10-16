@@ -92,10 +92,11 @@ from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 from dataclasses import asdict, dataclass
 from functools import partial
-from typing import IO, TextIO
+from typing import TextIO
 
 from einstein.arxiv_fetcher import fetch_papers as _fetch_papers
 from einstein.arxiv_source import NoTexSourceError
@@ -193,9 +194,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--json", action="store_true", dest="as_json", help="emit a JSON report instead of text")
     parser.add_argument(
         "--output",
-        type=argparse.FileType("w"),
-        default=sys.stdout,
-        help="write the report here instead of stdout",
+        default=None,
+        help="write the report here instead of stdout (only opened once the run succeeds)",
     )
     parser.add_argument(
         "--db",
@@ -640,6 +640,12 @@ def render_text(
 def main(argv: list[str] | None = None, *, stderr: TextIO = sys.stderr) -> int:
     parser = build_parser()
     args = parser.parse_args(argv)
+    if args.output == "-":
+        args.output = None  # argparse.FileType convention: '-' means stdout
+    if args.output is not None:
+        out_dir = os.path.dirname(os.path.abspath(args.output))
+        if not os.path.isdir(out_dir) or not os.access(out_dir, os.W_OK):
+            parser.error(f"--output: directory {out_dir!r} does not exist or is not writable")
 
     try:
         state, status, cross_pollination, constraint_mining = run(args)
@@ -654,10 +660,14 @@ def main(argv: list[str] | None = None, *, stderr: TextIO = sys.stderr) -> int:
         return 1
 
     render = render_json if args.as_json else render_text
-    output: IO[str] = args.output
-    output.write(render(args.domain, state, status, cross_pollination, constraint_mining))
-    if output is not sys.stdout:
-        output.close()
+    report = render(args.domain, state, status, cross_pollination, constraint_mining)
+    # Opened only after `run` succeeded (einstein-z1q): argparse.FileType would
+    # truncate the file at parse time, leaving an empty report on failure.
+    if args.output is None:
+        sys.stdout.write(report)
+    else:
+        with open(args.output, "w") as output:
+            output.write(report)
     return 0
 
 

@@ -207,6 +207,10 @@ def _extract_tex_files(raw: bytes, *, arxiv_id: str) -> dict[str, str]:
     except tarfile.ReadError:
         pass  # not a tarball -- fall through to single-file handling
 
+    if raw.lstrip().startswith(b"%PDF"):  # bare (non-gzipped) PDF-only e-print
+        raise NoTexSourceError(
+            f"e-print for {arxiv_id!r} is PDF-only, no LaTeX source available", arxiv_id=arxiv_id
+        )
     try:
         decompressed = gzip.decompress(raw)
     except OSError as exc:

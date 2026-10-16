@@ -485,6 +485,47 @@ class MainTest(unittest.TestCase):
         self.assertEqual(out.getvalue(), "", "a failed fetch must not produce a partial report on stdout")
         self.assertIn("papers fetch failed", err.getvalue())
 
+    def test_live_fetch_failure_with_output_path_creates_no_file(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report_path = Path(tmp) / "report.json"
+            with patch.object(cli, "_fetch_papers", side_effect=ArxivFetchError("boom", query="optimization", cause=Exception("boom"))), \
+                 patch.object(cli, "_fetch_repos", return_value=[]), \
+                 patch.object(cli, "_fetch_patents", return_value=[]):
+                code = cli.main(["optimization", "--json", "--output", str(report_path)], stderr=io.StringIO())
+
+            self.assertEqual(code, 1)
+            self.assertFalse(report_path.exists(), "a failed run must not leave an empty report file behind")
+
+    def test_output_path_receives_report_on_success(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            report_path = Path(tmp) / "report.json"
+            with patch.object(cli, "_fetch_papers", return_value=[]), \
+                 patch.object(cli, "_fetch_repos", return_value=[]), \
+                 patch.object(cli, "_fetch_patents", return_value=[]):
+                code = cli.main(["optimization", "--json", "--output", str(report_path)])
+
+            self.assertEqual(code, 0)
+            self.assertEqual(json.loads(report_path.read_text())["domain"], "optimization")
+
+    def test_output_dash_means_stdout(self):
+        out = io.StringIO()
+        with patch.object(cli, "_fetch_papers", return_value=[]), \
+             patch.object(cli, "_fetch_repos", return_value=[]), \
+             patch.object(cli, "_fetch_patents", return_value=[]), \
+             patch("sys.stdout", out):
+            code = cli.main(["optimization", "--json", "--output", "-"])
+
+        self.assertEqual(code, 0)
+        self.assertEqual(json.loads(out.getvalue())["domain"], "optimization")
+
+    def test_unwritable_output_dir_fails_before_any_fetch(self):
+        with patch.object(cli, "_fetch_papers") as fp, patch("sys.stderr", io.StringIO()):
+            with self.assertRaises(SystemExit) as ctx:
+                cli.main(["optimization", "--output", "/nonexistent-einstein-dir/r.json"])
+
+        self.assertEqual(ctx.exception.code, 2)
+        fp.assert_not_called()
+
     def test_missing_uspto_key_error_message_hints_at_skip_flag(self):
         out = io.StringIO()
         out.close = lambda: None

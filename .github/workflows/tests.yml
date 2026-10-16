@@ -1,0 +1,27 @@
+name: tests
+
+# einstein-ac4: the suite is offline (no network) and runs in under a second,
+# so it runs on every push and PR, separately from the live nightly job.
+
+on:
+  push:
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Install uv
+        uses: astral-sh/setup-uv@v3
+        with:
+          enable-cache: true
+
+      - run: uv sync --locked
+
+      - run: uv run python -m unittest discover tests

@@ -22,6 +22,8 @@ REPORT_DIR="${EINSTEIN_REPORT_DIR:-reports}"
 
 mkdir -p "$REPORT_DIR"
 
+# Expanded as ${skip_patents[@]+...} below: bash 3.2 (macOS /bin/bash) treats
+# an empty array as unbound under `set -u` (einstein-1c3).
 skip_patents=()
 if [ -z "${USPTO_API_KEY:-}" ]; then
   echo "USPTO_API_KEY not set -- running with --skip-patents" >&2
@@ -34,7 +36,7 @@ report_path="$REPORT_DIR/${timestamp}_$(echo "$DOMAIN" | tr -c 'a-zA-Z0-9' '-').
 uv run einstein "$DOMAIN" \
   --repo-threshold "$REPO_THRESHOLD" \
   --patent-threshold "$PATENT_THRESHOLD" \
-  "${skip_patents[@]}" \
+  ${skip_patents[@]+"${skip_patents[@]}"} \
   --json --output "$report_path"
 
 echo "wrote $report_path" >&2
