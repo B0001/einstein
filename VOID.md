@@ -56,15 +56,13 @@ No einstein citation was found in `portfolio/docket/patent-docket.xlsx`, in cert
 - Rerunning on current code does not revive a void pass. einstein is retired, and its patent
   side is uncalibrated.
 
-## Nightly CI is still running
+## Nightly CI stopped (2026-10-30)
 
-`.github/workflows/nightly.yml` is `active`. The public API shows a scheduled run every day,
-most recently 2026-10-23 08:35 UTC on `323b6b9`. Each run publishes a gap report from a
-retired tool. This command stops it. It was not run, because that is the owner's decision:
+`.github/workflows/nightly.yml` was deleted from `main` on 2026-10-30 (portfolio bead
+`portfolio-6hc.1`), which ends the daily scheduled run; until then it ran every day and
+published a gap report from a retired tool. The only workflow left is `tests.yml`, which runs
+on push and pull request, never on a schedule.
 
-```bash
-gh workflow disable nightly.yml -R B0001/einstein
-```
-
-Disabling it stops new runs only. The existing job logs and artifacts above stay public until
-they expire or the runs are deleted (`gh run delete <run-id> -R B0001/einstein`).
+Removing the workflow stops new runs only. The existing job logs and artifacts above stay
+public until they expire (logs about 90 days, so the oldest until about 2026-11-10; artifacts
+30 days) or the runs are deleted (`gh run delete <run-id> -R B0001/einstein`, the owner's call).
