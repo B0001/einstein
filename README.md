@@ -1,5 +1,13 @@
 # einstein
 
+> **VOID notice (2026-10-23).** einstein is retired (portfolio profit plan of 2026-10-17, C6).
+> Every einstein pass dated before 2026-10-15 is VOID. That covers two kinds of output.
+> The first is `novelty_auditor` `"pass"` verdicts: empty searches counted as passes until
+> the einstein-av1 fix (2026-09-24), and until `c5a2d03` (2026-10-15) theta was 0.85, which caught 0% of
+> near-verbatim restatements. The second is `true_invention_gap` labels from runs without
+> patent evidence (fixed in `323b6b9`). No einstein output is evidence of novelty or
+> clearance, and none goes to counsel. See [VOID.md](VOID.md).
+
 A gap-detection pipeline: ingest arXiv / GitHub / USPTO / OpenAlex, normalize
 every source into one `Record` schema (`einstein/schema.py`), embed and
 compare (`einstein/embedding.py`), and detect structural gaps between what
